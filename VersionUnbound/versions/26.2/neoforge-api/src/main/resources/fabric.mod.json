@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "versionunbound_neoforge",
+  "version": "${version}",
+  "name": "VersionUnbound NeoForge API",
+  "description": "The NeoForge 26.2 API implemented on Fabric, for mods loaded by VersionUnbound.",
+  "license": "LGPL-2.1-only",
+  "environment": "*",
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.2",
+    "fabric-api": "*"
+  }
+}

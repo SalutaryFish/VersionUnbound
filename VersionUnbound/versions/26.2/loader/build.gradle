@@ -1,0 +1,46 @@
+apply plugin: 'net.fabricmc.fabric-loom'
+
+loom {
+	mods {
+		versionunbound {
+			sourceSet sourceSets.main
+		}
+		versionunbound_neoforge {
+			sourceSet('main', ':neoforge-api')
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+
+	implementation project(':neoforge-api')
+	include project(':neoforge-api')
+
+	// Reads META-INF/neoforge.mods.toml.
+	implementation "com.electronwill.night-config:toml:${nightconfig_version}"
+	include "com.electronwill.night-config:toml:${nightconfig_version}"
+	include "com.electronwill.night-config:core:${nightconfig_version}"
+}
+
+processResources {
+	def version = project.version
+	inputs.property 'version', version
+	filesMatching('fabric.mod.json') {
+		expand 'version': version
+	}
+}
+
+// Dev runs load the testmods the way players would: as NeoForge jars in run/mods.
+def copyTestMods = tasks.register('copyTestMods', Copy) {
+	from(project(':testmods:hello').tasks.named('jar'))
+	into(file('run/mods'))
+	doLast {
+		file('run/eula.txt').text = 'eula=true\n'
+	}
+}
+tasks.matching { it.name in ['runClient', 'runServer'] }.configureEach {
+	dependsOn copyTestMods
+}

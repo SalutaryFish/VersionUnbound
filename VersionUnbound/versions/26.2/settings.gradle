@@ -1,0 +1,19 @@
+pluginManagement {
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = 'versionunbound'
+
+// Layer A: the NeoForge 26.2 API implemented on Fabric 26.2.
+include 'neoforge-api'
+// FML on Fabric: discovers NeoForge jars in mods/ and loads them.
+include 'loader'
+// Hand-written NeoForge mods that each exercise one API area.
+include 'testmods:hello'

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "versionunbound",
+  "version": "${version}",
+  "name": "VersionUnbound",
+  "description": "Loads NeoForge mods on Fabric.",
+  "license": "LGPL-2.1-only",
+  "environment": "*",
+  "entrypoints": {
+    "preLaunch": ["net.salutaryfish.versionunbound.loader.VersionUnboundPreLaunch"],
+    "main": ["net.salutaryfish.versionunbound.loader.VersionUnboundInit"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.2",
+    "versionunbound_neoforge": "*"
+  }
+}

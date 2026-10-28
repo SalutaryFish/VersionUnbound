@@ -1,0 +1,24 @@
+# Decompiled vanilla sources (regenerate with: mc-src 26.2 1.21.1)
+/src/mc-*/
+
+# Build output
+/dist/
+build/
+.gradle/
+run/
+out/
+result
+result-*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# Upstream reference clones (separate git repos) and test mod jars
+/src/mod_Src/
+/src/mod_Jars_*/

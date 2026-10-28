@@ -1,0 +1,12 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "LGPL-2.1-only"
+
+[[mods]]
+modId = "hello"
+version = "0.1.0"
+displayName = "VersionUnbound Hello"
+description = "Loader smoke test: construction, mod bus events, deferred work and a mixin."
+
+[[mixins]]
+config = "hello.mixins.json"
