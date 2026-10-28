@@ -1,6 +1,6 @@
 # VersionUnbound — Handoff
 
-State as of 2026-10-28. Phase 0 (workspace) and Phase 1 (loader spike) are done. **Next: Phase 2, Layer A core** (§8).
+State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 step 1 (FML metadata and context) are done. **Next: Phase 2 step 2, lifecycle ordering** (§8).
 
 The full approved plan is at `/home/username/.claude/plans/alright-our-goal-is-abstract-sparrow.md`. This file is self-contained, so you don't need the plan to continue.
 
@@ -22,7 +22,7 @@ Decisions the user made (don't re-ask):
 Phases:
 - **0. Workspace** ✅
 - **1. Loader spike** ✅
-- **2. Layer A core** ← next
+- **2. Layer A core** ← in progress (step 1 done, step 2 next)
 - **3. Layer B MVP.** Milestone: the unmodified Chunky 1.21.1 jar runs a pregen on a Fabric 26.2 server.
 - **4. Content mods, server side:** Toms Storage → FarmersDelight → KaleidoscopeCookery → DynamicTrees.
 - **5. Client shims.** GUI, renderers and models; the largest open-ended phase.
@@ -32,7 +32,7 @@ Phases:
 
 ## 2. Repository map
 
-Repo root: `/home/username/Development/active/minecraft-modding/VersionUnbound` (git repo, **nothing committed yet**).
+Repo root: `/home/username/Development/active/minecraft-modding/VersionUnbound` (git repo, branch `main`; each completed step is a commit, see `git log`).
 
 ```
 flake.nix, flake.lock         dev shells + `mc-src` tool (decompiles vanilla)
@@ -92,7 +92,7 @@ Key files inside the NeoForge 26.2 clone:
   - `~/.cache/mc-src/jars/1.21.1-client-mojmap.jar` (1.21.1 remapped)
   - `~/.cache/mc-src/jars/1.21.1-classpath.txt` (library list)
 - **Scratch files** go in the session scratchpad. Downloaded or extracted third-party content goes in its own directory. Run Python on it with `python3 -I`.
-- **Git identity is a placeholder** (`Your Name <you@example.com>`). Tell the user before the first commit. Don't commit unless asked.
+- **Git identity:** commits use the user's own identity `EroLightz <michelleyevon@protonmail.com>`, set in this repo's local git config (the global config is a placeholder). Never mention Claude in commits: no `Co-Authored-By` trailer. Don't commit unless asked.
 
 ---
 
@@ -105,58 +105,78 @@ Toolchain:
 - Fabric API **0.161.0+26.2**
 - Java 25 (`release = 25`)
 
-All versions are in `gradle.properties`, including the NeoForge ones: `neoforge_version=26.2.0.93`, `fml_version=11.0.16`, `eventbus_version=8.0.5`, `typetools_version=0.6.3`, `mergetool_version=2.0.7`, `nightconfig_version=3.9.0`. Group: `net.salutaryfish.versionunbound` (matches the user's other projects).
+All versions are in `gradle.properties`, including the NeoForge ones: `neoforge_version=26.2.0.93`, `neoform_version=2`, `fml_version=11.0.16`, `eventbus_version=8.0.5`, `typetools_version=0.6.3`, `mergetool_version=2.0.7`, `nightconfig_version=3.9.0`, `maven_artifact_version=3.9.16`. Group: `net.salutaryfish.versionunbound` (matches the user's other projects).
 
 ```
-settings.gradle      includes neoforge-api, loader, testmods:hello
+settings.gradle      includes neoforge-api, loader, testmods:hello, testmods:metadata
 build.gradle         root: applies loom (apply false); subprojects get java, NeoForged maven, Java 25
 neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
-  build.gradle       api+include net.neoforged:bus, include typetools, api+include mergetool:api (Dist/OnlyIn)
-  src/main/java/net/neoforged/fml/
-    ModContainer.java                 PARTIAL port (see "Shortcuts")
-    DeferredWorkQueue.java            port, simplified (no ModLoadingContext)
-    common/Mod.java                   exact port
-    event/IModBusEvent.java           exact port
-    event/lifecycle/{ModLifecycleEvent, ParallelDispatchEvent, FMLCommonSetupEvent}.java   ports (no IMC stream yet)
+  build.gradle       api+include: net.neoforged:bus, mergetool:api (Dist/OnlyIn), night-config toml (+core), maven-artifact;
+                     include typetools. processResources expands neoforge_version/neoform_version into fabric.mod.json
+                     (custom "versionunbound:implements"); the loader reads it to build FML's VersionInfo.
+  src/main/java/net/neoforged/{fml,neoforgespi}/   FML 11.0.16: 102 files verbatim, 9 adapted (see below)
+  src/main/resources/lang/*.json                   FML's translations for ModLoadingIssue keys (verbatim)
 loader/              Fabric mod id `versionunbound`, entrypoints preLaunch + main
-  build.gradle       implementation+include :neoforge-api; implementation+include night-config toml/core;
+  build.gradle       implementation+include :neoforge-api;
                      loom.mods { versionunbound {...}; versionunbound_neoforge { sourceSet('main', ':neoforge-api') } }
                      copyTestMods task (→ run/mods, writes eula.txt) wired into runClient/runServer
   src/main/java/net/salutaryfish/versionunbound/loader/
-    VersionUnboundPreLaunch.java   discover → FabricLauncherBase.getLauncher().addToClassPath(jar) → Mixins.addConfiguration(cfg)
-    NeoModDiscovery.java           scans <gameDir>/mods/*.jar for META-INF/neoforge.mods.toml (NightConfig TomlParser);
-                                   reads [[mods]] modId/version and [[mixins]] config; finds @Mod classes with ASM
-    NeoModCandidate.java           record(jar, modId, version, modClasses, mixinConfigs)
-    NeoModContainer.java           extends ModContainer; BusBuilder.markerType(IModBusEvent).allowPerPhasePost();
-                                   constructMod() = FML's constructor injection (IEventBus, ModContainer, NeoModContainer, Dist)
-    NeoModLoader.java              holds candidates; loadMods(): construct all, then FMLCommonSetupEvent + DeferredWorkQueue.runTasks()
-    VersionUnboundInit.java        ModInitializer → NeoModLoader.loadMods()
+    VersionUnboundPreLaunch.java   FMLLoader.create(Knot, dist, production, gameDir, versions) → NeoModDiscovery.findModJars
+                                   → FMLLoader.discoverMods(...) → addToClassPath(accepted jars) → NeoMixinConfigs.register
+    NeoModDiscovery.java           lists mods/*.jar that contain META-INF/neoforge.mods.toml (reading them is FML's job)
+    NeoMixinConfigs.java           FML's MixinFacade.addMixins, adapted: requiredMods, behaviorVersion, duplicate configs;
+                                   decorates each config with FabricUtil.KEY_MOD_ID / KEY_COMPATIBILITY
+    NeoModLoader.java              follows NeoForge's CommonModLoader. begin() = ModLoader.gatherAndInitializeMods;
+                                   load() = Common setup, Enqueue IMC, Process IMC (ModWorkManager sync/parallel executors)
+    VersionUnboundInit.java        ModInitializer → NeoModLoader.begin(); NeoModLoader.load()
 testmods/hello/      a GENUINE NeoForge 26.2 mod: Loom only supplies MC classes; compileOnly against the real
                      net.neoforged:neoforge:26.2.0.93:universal, fancymodloader:loader:11.0.16, bus, mergetool:api.
                      neoforge.mods.toml + hello.mixins.json (JAVA_21) + @Mixin(MinecraftServer) @Inject loadLevel HEAD.
+testmods/metadata/   genuine NeoForge 26.2 mod `metadata` (built like hello). Requires hello with ordering AFTER. 47 checks
+                     of IModInfo, ModList, ModLoadingContext, FMLEnvironment/FMLLoader/FMLPaths, extension points, scan data
+                     and IMC. Logs "[metadata] PASS|FAIL <check>" and, at Process IMC, "[metadata] all N checks passed".
 ```
 
-The built `loader-0.1.0.jar` nests `neoforge-api-0.1.0.jar`, `toml-3.9.0.jar` and `core-3.9.0.jar` under `META-INF/jars/`. The bus, typetools and mergetool jars are nested inside `neoforge-api`.
+The built `loader-0.1.0.jar` nests `neoforge-api-0.1.0.jar` under `META-INF/jars/`, and that nests bus, typetools, mergetool, NightConfig toml/core and maven-artifact.
 
-**Verified Phase 1 output** (dedicated server):
-```
-(VersionUnbound) Found NeoForge mod hello 0.1.0 (hello-0.1.0.jar), mixin configs [hello.mixins.json]
-(HelloMod) [hello] constructed: mod=hello, dist=DEDICATED_SERVER
-(HelloMod) [hello] common setup
-(HelloMod) [hello] deferred work ran
-(HelloMod) [hello] mixin applied: MinecraftServer.loadLevel
-(Minecraft) Done (1.743s)!
-```
-Mixin printed no warnings. Fabric Loader only logs `WARN Found 1 non-fabric mod: hello-0.1.0.jar`, which is harmless.
+**Where Layer A deviates from upstream FML 11.0.16.** Everything else under `neoforge-api/src/main/java/net/neoforged` is byte-identical to `src/mod_Src/main/FML-11.0.16`, which keeps future diffs against FML cheap. Each deviation has a `VersionUnbound:` comment.
+- `fml/loading/FMLLoader` is rewritten. It keeps the public API: `getCurrent`/`getCurrentOrNull`, `getDist`, `isProduction`, `getGameDir`, `getLoadingModList`, `getVersionInfo`, `getModFileByClass`, `getCurrentClassLoader`, static `getLanguageLoadingProvider`, `getBindings` (ServiceLoader on Knot), `getGameLayer` (returns the boot layer), and the `backgroundScanHandler` field. Its internal entry points are `create(...)` and `discoverMods(minecraftPath, neoForgePath, jars)`. `discoverMods` turns each jar into a `ModFile` (failures become `fml.modloadingissue.brokenfile` issues). It adds in-memory `minecraft` (26.2) and `neoforge` (26.2.0.93) system mods, which have empty contents and use the `minecraft` language loader (no event bus). Then it runs `ModSorter.sort` and `identifyLanguage`, and starts `BackgroundScanHandler`. Not ported: ProgramArgs, early window, class transformers, `close()`.
+- `ModFile`: no `JarModuleInfo`/`ModuleDescriptor`. `getPackages()` replaces `getModuleDescriptor().packages()`; `LoadingModList`'s package index (one-line change there) is its only user. A file without mods takes its id from the file name.
+- `IModFile`: the `create(...)` overloads that take a `JarModuleInfo` are dropped. `IModFileCandidateLocator.forFolder` is dropped (no locator plugins).
+- `ModFileParser.MODS_TOML` replaces `JarModsDotTomlModFileReader.MODS_TOML` (the reader pipeline isn't ported).
+- `LanguageProviderLoader` takes its providers as a list (`javafml`, `minecraft`) instead of loading services. `BuiltInLanguageLoader.version()` always returns `FMLVersion` (11.0.16), and mods' `loaderVersion` ranges are checked against that.
+- `FMLModContainer`'s module is Knot's unnamed module (that keeps `AutomaticEventSubscriber.inject(..., Module)` intact), and it loads classes with `Class.forName(name, false, loader)`.
 
-### Shortcuts taken in the spike (fix these in Phase 2)
-1. **`ModContainer(String modId)` constructor.** FML's is `ModContainer(IModInfo)`, and `getModInfo()`, extension points and `registerConfig(...)` are missing. Mods call `getModInfo()` and `registerConfig`, so port `neoforgespi` `IModInfo`/`IModFileInfo` and restore the real signatures.
-2. **`acceptEvent` wraps errors in `RuntimeException`.** FML throws `ModLoadingException`/`ModLoadingIssue`; port those.
-3. **`DeferredWorkQueue` never sets the active container.** FML calls `ModLoadingContext.get().setActiveContainer(...)` while running tasks; restore that once `ModLoadingContext` exists.
-4. **Lifecycle timing.** Mods are constructed and receive common setup back-to-back inside Fabric's `onInitialize`. NeoForge's real order is roughly: construct → `RegisterEvent` (all registries) → common setup → client/server setup → `FMLLoadCompleteEvent`.
-5. **Discovery is minimal.** It only scans the top level of `mods/`; JarJar (`META-INF/jarjar/metadata.json`) isn't handled. There is no dependency or version resolution, no `[[dependencies]]`, no `[[accessTransformers]]`, and no refuse list. A jar's mixin configs are attached to its first `[[mods]]` entry.
+**Verified step 1 output** (dedicated server, `hello` + `metadata`):
+```
+(VersionUnbound) Found NeoForge mod file hello-0.1.0.jar with mods [hello (VersionUnbound Hello) @ 0.1.0]
+(VersionUnbound) Found NeoForge mod file metadata-0.1.0.jar with mods [metadata (VersionUnbound Metadata) @ 1.2.3]
+[modloading-worker-0] (HelloMod) [hello] constructed: mod=hello, dist=DEDICATED_SERVER
+[modloading-worker-0] (MetadataMod) [metadata] mod list (4 mods, in load order): [minecraft, hello, metadata, neoforge]
+[modloading-worker-0] (HelloMod) [hello] common setup
+[modloading-sync-worker] (HelloMod) [hello] deferred work ran
+[modloading-worker-0] (MetadataMod) [metadata] all 47 checks passed
+[Server thread] (HelloMod) [hello] mixin applied: MinecraftServer.loadLevel
+(Minecraft) Done (0.183s)!
+```
+Negative check (done by hand, not a testmod): a jar that requires a missing mod and a too-new `hello`. FML's ModSorter rejects the set, and `onInitialize` throws `ModLoadingException: Loading errors encountered: - Mod brokendeps requires missing_dep 2.0 or above / Currently, missing_dep is not installed ...`, so the server doesn't start. That matches NeoForge.
+
+### Known gaps (updated after step 1)
+1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). But nothing loads configs yet. That (COMMON/CLIENT at startup, SERVER per world) and NeoForge's `ModConfigSpec` are step 6.
+2. ~~Errors wrapped in `RuntimeException`~~ **Fixed:** `ModLoadingException`/`ModLoadingIssue` and FML's translations, all verbatim.
+3. ~~`DeferredWorkQueue` without active container~~ **Fixed** (verbatim).
+4. **Lifecycle timing** (step 2). Today everything runs inside Fabric's `onInitialize`: construct (parallel, on FML's executors) → common setup → enqueue IMC → process IMC. Still missing: `RegisterEvent`, sided setup, `FMLLoadCompleteEvent` and config loading. NeoForge's exact order is in §5.
+5. **Discovery.** FML's `ModSorter` now does dependency/version resolution and ordering, including `config/fml.toml` `dependencyOverrides`. `[[mixins]]` are handled per file, with `requiredMods`/`behaviorVersion`. Still missing:
+   - JarJar.
+   - The refuse list.
+   - Applying `[[accessTransformers]]`: `ModFile.getAccessTransformers()` parses them, but nothing applies them.
+   - `enumExtensions` (FML's `RuntimeEnumExtender`; `EnumProxy` is used by 3 of the test jars).
 6. **No transformation or cache yet.** Jars are loaded as-is. The `transformer`, `cli` and `upgrade-1.21.1` subprojects don't exist yet.
 7. **Fabric doesn't know about NeoForge mods.** They aren't Fabric mods, so they're missing from `FabricLoader.getAllMods()`, ModMenu and so on, and their jar resources aren't mounted as resource or data packs. That's needed as soon as a mod ships assets or data.
+8. **No `IBindingsProvider` yet.** `@EventBusSubscriber` classes work for mod-bus events. Game-bus events throw "Could not find bindings provider" until Layer A ships `NeoForge.EVENT_BUS`, a bindings class and `META-INF/services/net.neoforged.fml.IBindingsProvider` (step 2 or 4).
+9. **`CrashReportCallables` aren't in crash reports yet.** They're collected (ModList registers "Mod List"), but nothing writes them into Minecraft's crash reports.
+10. **ModList lists only NeoForge mods plus `minecraft` and `neoforge`**, by design. If a NeoForge mod saw a Fabric mod's id it would enable integration code that expects the NeoForge build of that mod. Revisit if a specific integration needs it.
+11. **Only the dedicated server has run the new loader.** Step 2 adds the client entrypoint; add `pkgs.xvfb-run` to the flake then.
 
 ---
 
@@ -172,6 +192,17 @@ Mixin printed no warnings. Fabric Loader only logs `WARN Found 1 non-fabric mod:
 - In FML, a mod class needs exactly one public constructor. Its arguments are injected by type from `{IEventBus, ModContainer, FMLModContainer, Dist}`.
 - Loom accepts `sourceSet('main', ':other-project')` inside `loom.mods {}` for multi-project dev runs.
 - Mixin target that exists on both sides in 26.2: `MinecraftServer.loadLevel()` (protected). Also `runServer()` and `tickServer(BooleanSupplier)`; `DedicatedServer.initServer()`.
+- **Knot doesn't implement `ClassLoader.findClass`**, so `Class.forName(Module, String)` returns null for mod classes. Use `Class.forName(name, false, knotLoader)`.
+- **FML's mod order:** `UniqueModListBuilder` groups mod files in a `HashMap` keyed by mod id. `TopologicalSort` (Kahn's algorithm, ties broken by that order) then applies the `ordering` edges, so ties come out in HashMap order (`[minecraft, hello, metadata, neoforge]`). Real NeoForge gives the same order for the same ids.
+- **NeoForge 26.2's startup sequence** (`neoforge/internal/CommonModLoader`):
+  1. `ModLoader.gatherAndInitializeMods(ModWorkManager.syncExecutor(), parallelExecutor(), periodic)`: construction.
+  2. `runInitTask` "Registry initialization": `RegistryManager.postNewRegistryEvent`, `GameData.unfreezeData`, `postRegisterEvents`, `freezeData`.
+  3. "Config loading": CLIENT on the client, COMMON on both.
+  4. `NeoForge.EVENT_BUS.start()`.
+
+  Then `load()`: Common setup → Sided setup (`FMLClientSetupEvent`/`FMLDedicatedServerSetupEvent`) → "Registration events" → Enqueue IMC → Process IMC → `FMLLoadCompleteEvent` → "Network registry lock". `ModWorkManager.syncExecutor()` is its own single daemon thread (`modloading-sync-worker`), not the game's main thread. Mod constructors and parallel events run on `modloading-worker-N` ForkJoin threads.
+- **FML's library needs:** MC 26.2 already ships commons-lang3 3.20.0 (it still has `text.StrSubstitutor`), commons-io 2.20.0, Guava 33.6 and Gson 2.14. Only NightConfig and maven-artifact must be bundled, and maven-artifact's `versioning` package doesn't need plexus-utils at runtime.
+- **Fabric's Mixin** (sponge-mixin 0.17.4) has `FabricUtil.COMPATIBILITY_0_17_1` through `COMPATIBILITY_LATEST` (17004). FML uses the same decoration keys (`fabric-modId`, `fabric-compat`), so FML's mixin handling ports 1:1.
 - Maven: NeoForge artifacts at `https://maven.neoforged.net/releases/`, Parchment at `https://maven.parchmentmc.org/` (1.21.1 latest: 2024.11.17), Fabric at `https://maven.fabricmc.net/`.
 
 ---
@@ -256,7 +287,7 @@ Phase 3 replaces this with the proper ASM **reference scanner** in `cli`, which 
 
 Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `testmods/`, compiled against the real NeoForge artifacts like `hello` is, and a log line or assertion checked on `runServer` (and later `runClient`). Add each testmod to `settings.gradle` and to `copyTestMods` in `loader/build.gradle`.
 
-1. **FML metadata and context.** Port `neoforgespi` `IModInfo`/`IModFileInfo`/`IModFile` (only what mods use), `ModList` (`get()`, `isLoaded`, `getModContainerById`, `getModFileById`, `getMods`), `ModLoadingContext`, `FMLEnvironment`/`FMLLoader` (`getDist`, `isProduction`, `getCurrent()` as in 11.x), `FMLPaths` (`CONFIGDIR`, `GAMEDIR`, `MODSDIR`), `ModLoadingException`/`ModLoadingIssue`, and `InterModComms` with the IMC events. Restore the real `ModContainer` signatures (Shortcut 1). Make `NeoModDiscovery` read the full TOML.
+1. ✅ **FML metadata and context** (done 2026-10-28; see §4 and Known gaps). Original task: port `neoforgespi` `IModInfo`/`IModFileInfo`/`IModFile` (only what mods use), `ModList` (`get()`, `isLoaded`, `getModContainerById`, `getModFileById`, `getMods`), `ModLoadingContext`, `FMLEnvironment`/`FMLLoader` (`getDist`, `isProduction`, `getCurrent()` as in 11.x), `FMLPaths` (`CONFIGDIR`, `GAMEDIR`, `MODSDIR`), `ModLoadingException`/`ModLoadingIssue`, and `InterModComms` with the IMC events. Restore the real `ModContainer` signatures (Shortcut 1). Make `NeoModDiscovery` read the full TOML.
 2. **Lifecycle ordering.** Match NeoForge's sequence on Fabric:
    - Construct mods early in `onInitialize`, before other mods register content.
    - `RegisterEvent` (step 3).
@@ -265,7 +296,7 @@ Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `te
    - `InterModEnqueue`/`Process`.
    - `FMLLoadCompleteEvent`.
 
-   Add a `client` entrypoint to `loader`. Follow `FMLModContainer`'s `@EventBusSubscriber` auto-registration (`AutomaticEventSubscriber`).
+   Add a `client` entrypoint to `loader`. `@EventBusSubscriber` auto-registration (`AutomaticEventSubscriber`) is already ported and runs in `FMLModContainer.constructMod`; it needs a bindings provider for game-bus events (Known gap 8). Test the client here (Known gap 11).
 3. **Registries.** Port `DeferredRegister`/`DeferredHolder`/`DeferredBlock`/`DeferredItem`, `RegisterEvent`, `NewRegistryEvent`/`RegistryBuilder`, and `NeoForgeRegistries` (custom registries such as attachment types, fluid types, …).
    - Fire `RegisterEvent` once per vanilla registry **before Fabric freezes them**. Find the freeze point in Fabric API `fabric-registry-sync-v0`.
    - Custom registries must sync through Fabric registry sync.
@@ -281,11 +312,11 @@ Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `te
    - Convert `META-INF/injected-interfaces.json` into Loom interface injection (`custom.loom:injected_interfaces` in `fabric.mod.json`). Port the `I*Extension` interfaces; most methods are defaults.
    - Convert NeoForge's AT files into a class-tweaker/access widener for `neoforge-api` (Connector uses `net.fabricmc:class-tweaker`).
    - Mod-provided ATs (`[[accessTransformers]]` in the TOML) need runtime application. Decide between that and transforming the jar.
-6. **Configs.** Port `ModConfigSpec`, `ModConfig`, `ConfigTracker`, the config events and NightConfig file handling, plus `ModContainer.registerConfig`. Server configs load per world; check NeoForge's `ConfigTracker` for how.
+6. **Configs.** FML's side (`ModConfig`, `ConfigTracker`, `ModConfigEvent`, `ModContainer.registerConfig`) was ported verbatim in step 1. Remaining: NeoForge's `ModConfigSpec`, and calling `ConfigTracker.loadConfigs` at the right times (see the CommonModLoader sequence in §5). Server configs load per world; check NeoForge's `ConfigTracker` for how.
 7. **Networking.** Port `RegisterPayloadHandlersEvent`/`PayloadRegistrar`/`IPayloadContext`/`PacketDistributor` on top of Fabric `fabric-networking-api-v1` payload types (`PayloadTypeRegistry` + `ServerPlayNetworking`/`ClientPlayNetworking`).
 8. **Resources.** Mount NeoForge jars as mod resource and data packs. Look at Fabric's `ModResourcePack`/`fabric-resource-loader-v1` and how built-in mod packs are injected.
 9. **Basic capabilities and attachments.** `Capabilities`, `RegisterCapabilitiesEvent`, block/entity/item capability lookup (Fabric has `fabric-api-lookup-api-v1`, which is a close match), and `AttachmentType` (Fabric has `fabric-data-attachment-api-v1`).
-10. **Discovery hardening.** JarJar extraction (`META-INF/jarjar/metadata.json` lists nested jars), dependency and version checks, and the refuse list for render engines (by mod ID: `embeddium`, `sodium`, `iris`, `immersive_portals`, `firstperson`, `notenoughanimations`). Optionally register NeoForge mods with Fabric Loader's mod list (reflection on `FabricLoaderImpl`) so ModMenu and `isModLoaded` see them.
+10. **Discovery hardening.** JarJar extraction (`META-INF/jarjar/metadata.json` lists nested jars) and the refuse list (dependency and version checks already work through FML's `ModSorter`, since step 1) for render engines (by mod ID: `embeddium`, `sodium`, `iris`, `immersive_portals`, `firstperson`, `notenoughanimations`). Optionally register NeoForge mods with Fabric Loader's mod list (reflection on `FabricLoaderImpl`) so ModMenu and `isModLoaded` see them.
 
 Bonus check for step 4 and later: Chunky's `master` branch (`src/mod_Src/test/Chunky`) has a NeoForge module. If it builds for 26.2, it's a native test of Layer A before Layer B exists.
 
@@ -295,6 +326,14 @@ Create these subprojects:
 - `transformer`: an ASM pipeline that hashes each jar and caches the result in `.cache/versionunbound/`. Model it on Connector's `JarTransformer`.
 - `upgrade-1.21.1`: the rename map, generated by diffing `src/mc-1.21.1/java` against `src/mc-26.2/java` (and NeoForge 1.21.1 against 26.2) and then curated by hand. Apply it with `ClassRemapper`. Shim classes go under `compat.v1_21_1...`, with static bridge methods for calls whose signatures changed. Mixin target and descriptor retargeting soft-fails: a mixin that can't be fixed is disabled with a warning.
 - `cli`: runs the transform offline, plus the **reference scanner**, the main progress metric (unresolved references per test jar, trending toward 0).
+
+**FML 4 → 11 changes the 1.21.1 test jars hit.** Measured with a constant-pool scan of the 15 in-scope jars; the number is how many jars use each API.
+- `FMLEnvironment.dist`/`production` static fields (8) → `getDist()`/`isProduction()`.
+- Static `FMLLoader.isProduction()` (6), `getDist()` (3), `getLoadingModList()` (1) → `FMLLoader.getCurrent().…`.
+- `EventBusSubscriber.bus`/`EventBusSubscriber$Bus` (5): removed in 11, which picks the bus by event type.
+- `IModFile.findResource(String...)` (4) → `getContents().findFile(...)`.
+- `IModFile.getSecureJar()` (1) and `IModFileInfo.moduleName()` (1): gone.
+- `LoadingModList.get()` (3) still exists in 11 (deprecated).
 
 Hook the transformer into `VersionUnboundPreLaunch` before `addToClassPath`: detect 1.21.1 jars (the TOML `loaderVersion`/NeoForge dependency range, or the presence of 1.21.1-only references), transform them, and load the cached copy. Milestone: `Chunky-NeoForge-1.4.23.jar` unmodified, `chunky start` running a pregen on `runServer`. A data and asset JSON upgrader comes in Phase 4.
 

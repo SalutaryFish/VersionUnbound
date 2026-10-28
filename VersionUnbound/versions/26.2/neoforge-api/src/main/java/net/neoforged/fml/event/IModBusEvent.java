@@ -6,6 +6,6 @@
 package net.neoforged.fml.event;
 
 /**
- * Marker for events posted on a mod's own event bus rather than the game bus.
+ * Marker interface for events dispatched on the ModLifecycle event bus instead of the primary event bus
  */
 public interface IModBusEvent {}

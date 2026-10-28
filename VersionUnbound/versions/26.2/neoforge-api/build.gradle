@@ -11,12 +11,19 @@ dependencies {
 	include "net.jodah:typetools:${typetools_version}"
 	api "net.neoforged:mergetool:${mergetool_version}:api"
 	include "net.neoforged:mergetool:${mergetool_version}:api"
+
+	// FML's own libraries that Minecraft doesn't ship: mods.toml/config parsing and Maven version ranges.
+	api "com.electronwill.night-config:toml:${nightconfig_version}"
+	include "com.electronwill.night-config:toml:${nightconfig_version}"
+	include "com.electronwill.night-config:core:${nightconfig_version}"
+	api "org.apache.maven:maven-artifact:${maven_artifact_version}"
+	include "org.apache.maven:maven-artifact:${maven_artifact_version}"
 }
 
 processResources {
-	def version = project.version
-	inputs.property 'version', version
+	def props = [version: project.version, neoforge_version: neoforge_version, neoform_version: neoform_version]
+	inputs.properties props
 	filesMatching('fabric.mod.json') {
-		expand 'version': version
+		expand props
 	}
 }

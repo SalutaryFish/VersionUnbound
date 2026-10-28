@@ -18,11 +18,6 @@ dependencies {
 
 	implementation project(':neoforge-api')
 	include project(':neoforge-api')
-
-	// Reads META-INF/neoforge.mods.toml.
-	implementation "com.electronwill.night-config:toml:${nightconfig_version}"
-	include "com.electronwill.night-config:toml:${nightconfig_version}"
-	include "com.electronwill.night-config:core:${nightconfig_version}"
 }
 
 processResources {
@@ -36,6 +31,7 @@ processResources {
 // Dev runs load the testmods the way players would: as NeoForge jars in run/mods.
 def copyTestMods = tasks.register('copyTestMods', Copy) {
 	from(project(':testmods:hello').tasks.named('jar'))
+	from(project(':testmods:metadata').tasks.named('jar'))
 	into(file('run/mods'))
 	doLast {
 		file('run/eula.txt').text = 'eula=true\n'

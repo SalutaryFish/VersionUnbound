@@ -17,3 +17,4 @@ include 'neoforge-api'
 include 'loader'
 // Hand-written NeoForge mods that each exercise one API area.
 include 'testmods:hello'
+include 'testmods:metadata'
