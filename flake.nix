@@ -103,6 +103,7 @@
                 pkgs.jq
                 pkgs.unzip
                 pkgs.zip
+                pkgs.xvfb-run # headless client runs: xvfb-run -a ./gradlew :loader:runClient
                 self.packages.${pkgs.stdenv.hostPlatform.system}.mc-src
               ];
               JAVA_HOME = jdk.home;

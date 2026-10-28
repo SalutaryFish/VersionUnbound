@@ -1,0 +1,16 @@
+// A plain Fabric mod. Its main entrypoint marks the point where Fabric initializes mods, which the lifecycle
+// testmod checks NeoForge's loading steps against.
+apply plugin: 'net.fabricmc.fabric-loom'
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${loader_version}"
+}
+
+processResources {
+	def version = project.version
+	inputs.property 'version', version
+	filesMatching('fabric.mod.json') {
+		expand 'version': version
+	}
+}

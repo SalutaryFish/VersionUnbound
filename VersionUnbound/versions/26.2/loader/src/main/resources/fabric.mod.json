@@ -7,8 +7,7 @@
   "license": "LGPL-2.1-only",
   "environment": "*",
   "entrypoints": {
-    "preLaunch": ["net.salutaryfish.versionunbound.loader.VersionUnboundPreLaunch"],
-    "main": ["net.salutaryfish.versionunbound.loader.VersionUnboundInit"]
+    "preLaunch": ["net.salutaryfish.versionunbound.loader.VersionUnboundPreLaunch"]
   },
   "depends": {
     "fabricloader": ">=0.19.5",

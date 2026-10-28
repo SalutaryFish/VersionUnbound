@@ -7,6 +7,7 @@ loom {
 		}
 		versionunbound_neoforge {
 			sourceSet('main', ':neoforge-api')
+			sourceSet('client', ':neoforge-api')
 		}
 	}
 }
@@ -28,10 +29,12 @@ processResources {
 	}
 }
 
-// Dev runs load the testmods the way players would: as NeoForge jars in run/mods.
+// Dev runs load the testmods the way players would: as jars in run/mods.
 def copyTestMods = tasks.register('copyTestMods', Copy) {
 	from(project(':testmods:hello').tasks.named('jar'))
 	from(project(':testmods:metadata').tasks.named('jar'))
+	from(project(':testmods:lifecycle').tasks.named('jar'))
+	from(project(':testmods:fabricprobe').tasks.named('jar'))
 	into(file('run/mods'))
 	doLast {
 		file('run/eula.txt').text = 'eula=true\n'

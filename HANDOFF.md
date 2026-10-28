@@ -1,6 +1,6 @@
 # VersionUnbound — Handoff
 
-State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 step 1 (FML metadata and context) are done. **Next: Phase 2 step 2, lifecycle ordering** (§8).
+State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 steps 1 (FML metadata and context) and 2 (lifecycle ordering) are done. **Next: Phase 2 step 3, registries** (§8).
 
 The full approved plan is at `/home/username/.claude/plans/alright-our-goal-is-abstract-sparrow.md`. This file is self-contained, so you don't need the plan to continue.
 
@@ -18,11 +18,12 @@ Decisions the user made (don't re-ask):
 | Loading | **Drop-in at runtime.** Our Fabric mod acts as FML in `preLaunch`. A CLI runs the same pipeline for debugging. |
 | Rendering-engine mods | **Out of scope for v1.** Embeddium, Sodium, Iris, Immersive Portals, FirstPersonModel and NotEnoughAnimations are detected and refused with a clear message. |
 | License | Porting NeoForge (LGPL-2.1) code is allowed. The project is **LGPL-2.1-only**. Connector is MIT and Fabric API is Apache-2.0, so both can be reused freely. |
+| Lifecycle hooks | **Mixins at NeoForge's own call sites, not Fabric entrypoints** (chosen in step 2). Construction and registration (`begin`) run right after `Bootstrap.validate()`, before every Fabric mod's `onInitialize`. Setup (`load`) runs where NeoForge runs it, after Fabric's mod init and Fabric API's registry freeze. Reason: the same order on every launch, whatever mods are installed. Consequence: **nothing in `begin` may rely on a Fabric initializer** (Fabric API's or our own). The sequence is in §4. |
 
 Phases:
 - **0. Workspace** ✅
 - **1. Loader spike** ✅
-- **2. Layer A core** ← in progress (step 1 done, step 2 next)
+- **2. Layer A core** ← in progress (steps 1–2 done, step 3 next)
 - **3. Layer B MVP.** Milestone: the unmodified Chunky 1.21.1 jar runs a pregen on a Fabric 26.2 server.
 - **4. Content mods, server side:** Toms Storage → FarmersDelight → KaleidoscopeCookery → DynamicTrees.
 - **5. Client shims.** GUI, renderers and models; the largest open-ended phase.
@@ -64,18 +65,23 @@ Key files inside the NeoForge 26.2 clone:
 
 ## 3. Environment and commands
 
-- **NixOS.** Use the flake dev shell. Java isn't on PATH outside it.
+- **NixOS.** Use the flake dev shell. Java isn't on PATH outside it, and neither is `zip`.
   - `nix develop` gives JDK 25 (for 26.x). `nix develop .#jdk21` gives JDK 21 (for 1.21.x).
-  - Both shells set `LD_LIBRARY_PATH` for LWJGL and include `mc-src`, `git`, `jq`, `zip`/`unzip`.
+  - Both shells set `LD_LIBRARY_PATH` for LWJGL and include `mc-src`, `git`, `jq`, `zip`/`unzip`, `xvfb-run`.
 - **The flake only sees git-tracked files.** If you add a file the flake reads (e.g. under `nix/`), `git add` it first, or Nix won't find it.
-- Build and run, from `VersionUnbound/versions/26.2`:
+- Build and run, from `VersionUnbound/versions/26.2` (`<repo>` is the repo root). Write logs to the session scratchpad; `*.log` isn't git-ignored.
   ```
-  nix develop /home/username/Development/active/minecraft-modding/VersionUnbound -c ./gradlew build
-  (sleep 150; echo stop) | timeout 300 nix develop <repo> -c ./gradlew :loader:runServer --console=plain > server.log 2>&1
+  nix develop <repo> -c ./gradlew build
+  # Server: sends `stop` once the server is up (or failed), so a run takes about 15 s.
+  ( for i in $(seq 1 120); do sleep 2; grep -qE 'Done \(|Failed to start|BUILD FAILED' $LOG && break; done; sleep 3; echo stop ) \
+    | timeout 300 nix develop <repo> -c ./gradlew :loader:runServer --console=plain > $LOG 2>&1
+  # Client, headless:
+  nix develop <repo> -c xvfb-run -a -s '-screen 0 1600x900x24' ./gradlew :loader:runClient --console=plain > $LOG 2>&1 &
   ```
-  - `runServer`/`runClient` depend on `copyTestMods`, which copies testmod jars into `loader/run/mods/` and writes `eula=true`.
+  - `runServer`/`runClient` depend on `copyTestMods`, which copies testmod jars into `loader/run/mods/` and writes `eula=true`. It doesn't delete other jars there, so a jar dropped in by hand stays until you remove it.
   - Piping `stop` into Gradle works: stdin is forwarded to the server.
-  - For a client without a display: `xvfb-run -a ./gradlew :loader:runClient`. `xvfb-run` isn't in our shell yet; the sibling WildernessUnbound flake has it, so add `pkgs.xvfb-run` when needed.
+  - **The client doesn't exit on its own.** Once `[lifecycle] all N checks passed` (or `FAILED`) shows up, kill the game JVM: the `java` process whose `/proc/<pid>/cmdline` contains `net.fabricmc.devlaunchinjector.Main` (pick it with `pgrep -x java`). Gradle then reports exit value 143 and BUILD FAILED, which is expected. Don't use `pkill -f` with that pattern from a script: it also matches the shell running the script and kills it.
+  - Under Xvfb the client renders with Mesa llvmpipe (OpenGL 4.6). Mesa's "vulkan: No DRI3 support" note is harmless.
 - **`mc-src <ver>...`** decompiles vanilla into `src/mc-<ver>/` and caches downloads in `~/.cache/mc-src/`.
   - **Obfuscated versions** (e.g. 1.21.1) go through four steps:
     1. AutoRenamingTool applies Mojang's mappings (`--reverse`).
@@ -108,17 +114,27 @@ Toolchain:
 All versions are in `gradle.properties`, including the NeoForge ones: `neoforge_version=26.2.0.93`, `neoform_version=2`, `fml_version=11.0.16`, `eventbus_version=8.0.5`, `typetools_version=0.6.3`, `mergetool_version=2.0.7`, `nightconfig_version=3.9.0`, `maven_artifact_version=3.9.16`. Group: `net.salutaryfish.versionunbound` (matches the user's other projects).
 
 ```
-settings.gradle      includes neoforge-api, loader, testmods:hello, testmods:metadata
+settings.gradle      includes neoforge-api, loader, testmods:{hello,metadata,lifecycle,fabricprobe}
 build.gradle         root: applies loom (apply false); subprojects get java, NeoForged maven, Java 25
 neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
-  build.gradle       api+include: net.neoforged:bus, mergetool:api (Dist/OnlyIn), night-config toml (+core), maven-artifact;
-                     include typetools. processResources expands neoforge_version/neoform_version into fabric.mod.json
-                     (custom "versionunbound:implements"); the loader reads it to build FML's VersionInfo.
+  build.gradle       loom splitEnvironmentSourceSets(): client-only code goes in src/client, as in NeoForge, so common code
+                     can't reference client classes. api+include: net.neoforged:bus, mergetool:api (Dist/OnlyIn),
+                     night-config toml (+core), maven-artifact; include typetools. processResources expands
+                     neoforge_version/neoform_version into fabric.mod.json (custom "versionunbound:implements"); the
+                     loader reads it to build FML's VersionInfo.
   src/main/java/net/neoforged/{fml,neoforgespi}/   FML 11.0.16: 102 files verbatim, 9 adapted (see below)
+  src/main/java/net/neoforged/neoforge/            NeoForge 26.2: common/NeoForge (the game bus), internal/{NeoForgeBindings,
+                                                   CommonModLoader, RegistrationEvents}, server/loading/ServerModLoader
+  src/client/java/net/neoforged/neoforge/          client/loading/ClientModLoader
+  src/main/java/net/salutaryfish/versionunbound/neoforge/mixin/server/MainMixin   versionunbound_neoforge.mixins.json ("server")
+  src/client/java/net/salutaryfish/versionunbound/neoforge/client/mixin/{MainMixin,MinecraftMixin}
+                                                   versionunbound_neoforge.client.mixins.json; these 3 mixins are NeoForge's
+                                                   loading hooks (the sequence is below)
+  src/main/resources/META-INF/services/net.neoforged.fml.IBindingsProvider   → NeoForgeBindings (verbatim)
   src/main/resources/lang/*.json                   FML's translations for ModLoadingIssue keys (verbatim)
-loader/              Fabric mod id `versionunbound`, entrypoints preLaunch + main
-  build.gradle       implementation+include :neoforge-api;
-                     loom.mods { versionunbound {...}; versionunbound_neoforge { sourceSet('main', ':neoforge-api') } }
+loader/              Fabric mod id `versionunbound`, entrypoint preLaunch only
+  build.gradle       implementation+include :neoforge-api; loom.mods { versionunbound {...};
+                     versionunbound_neoforge { sourceSet('main', ':neoforge-api'); sourceSet('client', ':neoforge-api') } }
                      copyTestMods task (→ run/mods, writes eula.txt) wired into runClient/runServer
   src/main/java/net/salutaryfish/versionunbound/loader/
     VersionUnboundPreLaunch.java   FMLLoader.create(Knot, dist, production, gameDir, versions) → NeoModDiscovery.findModJars
@@ -126,20 +142,46 @@ loader/              Fabric mod id `versionunbound`, entrypoints preLaunch + mai
     NeoModDiscovery.java           lists mods/*.jar that contain META-INF/neoforge.mods.toml (reading them is FML's job)
     NeoMixinConfigs.java           FML's MixinFacade.addMixins, adapted: requiredMods, behaviorVersion, duplicate configs;
                                    decorates each config with FabricUtil.KEY_MOD_ID / KEY_COMPATIBILITY
-    NeoModLoader.java              follows NeoForge's CommonModLoader. begin() = ModLoader.gatherAndInitializeMods;
-                                   load() = Common setup, Enqueue IMC, Process IMC (ModWorkManager sync/parallel executors)
-    VersionUnboundInit.java        ModInitializer → NeoModLoader.begin(); NeoModLoader.load()
 testmods/hello/      a GENUINE NeoForge 26.2 mod: Loom only supplies MC classes; compileOnly against the real
                      net.neoforged:neoforge:26.2.0.93:universal, fancymodloader:loader:11.0.16, bus, mergetool:api.
                      neoforge.mods.toml + hello.mixins.json (JAVA_21) + @Mixin(MinecraftServer) @Inject loadLevel HEAD.
 testmods/metadata/   genuine NeoForge 26.2 mod `metadata` (built like hello). Requires hello with ordering AFTER. 47 checks
                      of IModInfo, ModList, ModLoadingContext, FMLEnvironment/FMLLoader/FMLPaths, extension points, scan data
                      and IMC. Logs "[metadata] PASS|FAIL <check>" and, at Process IMC, "[metadata] all N checks passed".
+testmods/lifecycle/  genuine NeoForge 26.2 mod `lifecycle` (built like hello). 11 checks on the server, 12 on the client: step
+                     order, construction before / setup after Fabric's mod init, registries frozen by common setup, FML
+                     config loading (a minimal IConfigSpec writes config/lifecycle-common.toml), the game bus via addListener
+                     and @EventBusSubscriber (bindings provider), threads, and on the client that client setup sees the
+                     window, options, resources and renderers. Logs "[lifecycle] all N checks passed" at load complete.
+testmods/fabricprobe/ a plain Fabric mod whose main entrypoint sets the system property
+                     versionunbound.testprobe.fabricInitialized; `lifecycle` reads it.
 ```
 
 The built `loader-0.1.0.jar` nests `neoforge-api-0.1.0.jar` under `META-INF/jars/`, and that nests bus, typetools, mergetool, NightConfig toml/core and maven-artifact.
 
-**Where Layer A deviates from upstream FML 11.0.16.** Everything else under `neoforge-api/src/main/java/net/neoforged` is byte-identical to `src/mod_Src/main/FML-11.0.16`, which keeps future diffs against FML cheap. Each deviation has a `VersionUnbound:` comment.
+**How mods load (since step 2).** The hooks sit where NeoForge's patches put them, except that construction and registration move ahead of Fabric's mod initialization (the decision in §1):
+```
+preLaunch (loader)          FMLLoader.create → discovery and sorting → addToClassPath → mixin configs
+server Main / client Main,  ServerModLoader.begin(false) / ClientModLoader.begin() = CommonModLoader.begin:
+  after Bootstrap.validate()  construct mods (parallel) → "Registry initialization" (placeholder until step 3)
+                              → "Config loading" (CLIENT on the client, then COMMON) → NeoForge.EVENT_BUS.start()
+Fabric                      every Fabric mod's onInitialize (+Client/Server); then Fabric API freezes the registries
+server: before `new DedicatedServerSettings` (NeoForge's spot) → ServerModLoader.load()
+client: Minecraft.<init>, after registerPanoramaTextures (NeoForge's spot) → ClientModLoader.finish()
+                            = CommonModLoader.load: Common setup → Sided setup → "Registration events" (placeholder)
+                              → Enqueue IMC → Process IMC → FMLLoadCompleteEvent → "Network registry lock" (placeholder)
+```
+`--initSettings` on the server skips mod loading, as in NeoForge. A `ModLoadingException` on the server propagates out of the hook to vanilla's "Failed to start the minecraft server", and the process exits. On the client, vanilla writes a crash report (description "Bootstrap" for errors in `begin`, "Initializing game" for errors in `finish`) and exits with -1. Both paths were checked with the `brokendeps` jar (client: `begin` only).
+
+**Where Layer A deviates from upstream.** Everything else under `neoforge-api/src/{main,client}/java/net/neoforged` is byte-identical to `src/mod_Src/main/FML-11.0.16` or to the NeoForge 26.2 clone, which keeps future diffs cheap. Each deviation has a `VersionUnbound:` comment.
+
+NeoForge (`NeoForge`, `NeoForgeBindings` and the services file are verbatim):
+- `internal/CommonModLoader`: the registry initialization body (step 3) and the network registry lock (step 7) are commented-out placeholders.
+- `internal/RegistrationEvents.init()`: every call is commented out until its feature lands (steps 3 and 9).
+- `server/loading/ServerModLoader`: `load(boolean)` is split into `begin(boolean)` and `load()` for the two hook points. `LanguageHook` and the crash report dump (`CrashReportExtender`) aren't ported.
+- `client/loading/ClientModLoader`: only `begin()` and `finish()`. Missing: the log4j shutdown hook (Fabric keeps log4j's own), the early loading screen, `LanguageHook`, `setupModResourcePacks` (step 8), the client network registry lock (step 7), update checks, the loading-warnings screen and FML's fatal error window.
+
+FML 11.0.16:
 - `fml/loading/FMLLoader` is rewritten. It keeps the public API: `getCurrent`/`getCurrentOrNull`, `getDist`, `isProduction`, `getGameDir`, `getLoadingModList`, `getVersionInfo`, `getModFileByClass`, `getCurrentClassLoader`, static `getLanguageLoadingProvider`, `getBindings` (ServiceLoader on Knot), `getGameLayer` (returns the boot layer), and the `backgroundScanHandler` field. Its internal entry points are `create(...)` and `discoverMods(minecraftPath, neoForgePath, jars)`. `discoverMods` turns each jar into a `ModFile` (failures become `fml.modloadingissue.brokenfile` issues). It adds in-memory `minecraft` (26.2) and `neoforge` (26.2.0.93) system mods, which have empty contents and use the `minecraft` language loader (no event bus). Then it runs `ModSorter.sort` and `identifyLanguage`, and starts `BackgroundScanHandler`. Not ported: ProgramArgs, early window, class transformers, `close()`.
 - `ModFile`: no `JarModuleInfo`/`ModuleDescriptor`. `getPackages()` replaces `getModuleDescriptor().packages()`; `LoadingModList`'s package index (one-line change there) is its only user. A file without mods takes its id from the file name.
 - `IModFile`: the `create(...)` overloads that take a `JarModuleInfo` are dropped. `IModFileCandidateLocator.forFolder` is dropped (no locator plugins).
@@ -161,11 +203,26 @@ The built `loader-0.1.0.jar` nests `neoforge-api-0.1.0.jar` under `META-INF/jars
 ```
 Negative check (done by hand, not a testmod): a jar that requires a missing mod and a too-new `hello`. FML's ModSorter rejects the set, and `onInitialize` throws `ModLoadingException: Loading errors encountered: - Mod brokendeps requires missing_dep 2.0 or above / Currently, missing_dep is not installed ...`, so the server doesn't start. That matches NeoForge.
 
-### Known gaps (updated after step 1)
-1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). But nothing loads configs yet. That (COMMON/CLIENT at startup, SERVER per world) and NeoForge's `ModConfigSpec` are step 6.
+**Verified step 2 output.** Dedicated server, with `lifecycle`, `hello`, `metadata` and `fabricprobe`:
+```
+[modloading-worker-0] (LifecycleMod) [lifecycle] PASS constructed before Fabric initializes its mods
+[modloading-sync-worker] (LifecycleMod) [lifecycle] PASS config handed to the spec
+[main] (FabricProbe) [fabricprobe] Fabric is initializing its mods
+[modloading-worker-0] (LifecycleMod) [lifecycle] PASS common setup after Fabric initializes its mods
+[modloading-worker-0] (LifecycleMod) [lifecycle] PASS registries frozen by common setup
+...
+[modloading-worker-0] (MetadataMod) [metadata] all 47 checks passed
+[modloading-worker-0] (LifecycleMod) [lifecycle] all 11 checks passed
+[Server thread] (HelloMod) [hello] mixin applied: MinecraftServer.loadLevel
+(Minecraft) Done (0.331s)!
+```
+Client (Xvfb): the same order, with `[fabricprobe]` on the Render thread inside `Minecraft.<init>`. `[lifecycle] all 12 checks passed` comes before "Reloading ResourceManager". The client then builds all its texture atlases and starts the sound engine, with no errors, until it's stopped. Negative check, repeated with the new hooks: the `brokendeps` jar now fails from `ServerModLoader.begin` inside `Main.main` (stack: `Main.handler$…$versionunbound$beginModLoading`). Vanilla logs "Failed to start the minecraft server" with the same FML message, and the process exits. On the client the same jar produces a "Bootstrap" crash report in `loader/run/crash-reports/`.
+
+### Known gaps (updated after step 2)
+1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). Since step 2, COMMON and CLIENT configs load at NeoForge's point in `begin` (the `lifecycle` testmod checks this with its own minimal `IConfigSpec`). Still missing: NeoForge's `ModConfigSpec`, and SERVER configs per world (step 6).
 2. ~~Errors wrapped in `RuntimeException`~~ **Fixed:** `ModLoadingException`/`ModLoadingIssue` and FML's translations, all verbatim.
 3. ~~`DeferredWorkQueue` without active container~~ **Fixed** (verbatim).
-4. **Lifecycle timing** (step 2). Today everything runs inside Fabric's `onInitialize`: construct (parallel, on FML's executors) → common setup → enqueue IMC → process IMC. Still missing: `RegisterEvent`, sided setup, `FMLLoadCompleteEvent` and config loading. NeoForge's exact order is in §5.
+4. ~~Lifecycle timing~~ **Fixed in step 2:** NeoForge's full sequence at NeoForge's hook points (see "How mods load" above). Still placeholders: registry initialization (`RegisterEvent`, step 3), "Registration events" (steps 3 and 9) and the network registry locks (step 7).
 5. **Discovery.** FML's `ModSorter` now does dependency/version resolution and ordering, including `config/fml.toml` `dependencyOverrides`. `[[mixins]]` are handled per file, with `requiredMods`/`behaviorVersion`. Still missing:
    - JarJar.
    - The refuse list.
@@ -173,10 +230,13 @@ Negative check (done by hand, not a testmod): a jar that requires a missing mod 
    - `enumExtensions` (FML's `RuntimeEnumExtender`; `EnumProxy` is used by 3 of the test jars).
 6. **No transformation or cache yet.** Jars are loaded as-is. The `transformer`, `cli` and `upgrade-1.21.1` subprojects don't exist yet.
 7. **Fabric doesn't know about NeoForge mods.** They aren't Fabric mods, so they're missing from `FabricLoader.getAllMods()`, ModMenu and so on, and their jar resources aren't mounted as resource or data packs. That's needed as soon as a mod ships assets or data.
-8. **No `IBindingsProvider` yet.** `@EventBusSubscriber` classes work for mod-bus events. Game-bus events throw "Could not find bindings provider" until Layer A ships `NeoForge.EVENT_BUS`, a bindings class and `META-INF/services/net.neoforged.fml.IBindingsProvider` (step 2 or 4).
-9. **`CrashReportCallables` aren't in crash reports yet.** They're collected (ModList registers "Mod List"), but nothing writes them into Minecraft's crash reports.
+8. ~~No `IBindingsProvider`~~ **Fixed in step 2:** `NeoForge.EVENT_BUS`, `NeoForgeBindings` and the services file, all verbatim. `@EventBusSubscriber` methods for game-bus events register, and the bus starts at the end of `begin`. Layer A doesn't post any game events yet; that's step 4.
+9. **Crash reports.** `CrashReportCallables` are collected (ModList registers "Mod List"), but nothing writes them into Minecraft's crash reports. NeoForge's `CrashReportExtender` (including the mod loading crash dump the server writes on errors) isn't ported.
 10. **ModList lists only NeoForge mods plus `minecraft` and `neoforge`**, by design. If a NeoForge mod saw a Fabric mod's id it would enable integration code that expects the NeoForge build of that mod. Revisit if a specific integration needs it.
-11. **Only the dedicated server has run the new loader.** Step 2 adds the client entrypoint; add `pkgs.xvfb-run` to the flake then.
+11. ~~Only the dedicated server has run the loader~~ **Fixed in step 2:** the client runs under Xvfb (§3).
+12. **Only two launch paths are hooked:** the dedicated server's `Main` and the client's `Main`/`Minecraft`. NeoForge also loads mods from the GameTest server (`GameTestMainUtil`, `ServerModLoader.load(true)`) and from datagen. Neither is needed to run mods.
+13. **For Phase 5: `ClientBootstrap.bootstrap()`.** Vanilla calls it in `client/main/Main` before `Bootstrap.validate()`, so before mods are constructed. NeoForge moves it into `Minecraft.<init>`, after `setupModResourcePacks`, so that the item-model registration events it fires reach mods. Do the same when those events are ported.
+14. **No server-side translations (`LanguageHook`).** NeoForge loads its own and mods' `en_us` into the server's language table, so server-side `Component.translatable` text and translated loading errors work without a client.
 
 ---
 
@@ -204,6 +264,15 @@ Negative check (done by hand, not a testmod): a jar that requires a missing mod 
 - **FML's library needs:** MC 26.2 already ships commons-lang3 3.20.0 (it still has `text.StrSubstitutor`), commons-io 2.20.0, Guava 33.6 and Gson 2.14. Only NightConfig and maven-artifact must be bundled, and maven-artifact's `versioning` package doesn't need plexus-utils at runtime.
 - **Fabric's Mixin** (sponge-mixin 0.17.4) has `FabricUtil.COMPATIBILITY_0_17_1` through `COMPATIBILITY_LATEST` (17004). FML uses the same decoration keys (`fabric-modId`, `fabric-compat`), so FML's mixin handling ports 1:1.
 - Maven: NeoForge artifacts at `https://maven.neoforged.net/releases/`, Parchment at `https://maven.parchmentmc.org/` (1.21.1 latest: 2024.11.17), Fabric at `https://maven.fabricmc.net/`.
+- **Where Fabric initializes mods, and when it freezes registries** (`src/mod_Src/main/fabric-api`, branch 26.2, `fabric-registry-sync-v0`):
+  - `BootstrapMixin` redirects vanilla's `BuiltInRegistries.bootStrap()` to `createContents()` only. Vanilla registries stay open from bootstrap until Fabric API freezes them after Fabric's mod init.
+  - Server: Fabric Loader calls `onInitialize`/`onInitializeServer` in `server/Main.main` just before `Util.startTimerHackThread()`. `MainMixin` freezes the registries at that call.
+  - Client: the `main` and `client` entrypoints run in `Minecraft.<init>` just before `this.gameThread = Thread.currentThread()` (decompiled line 417). That's after `instance = this`, but before `Options`, the window, the resource and texture managers and the renderers exist. The client `MinecraftMixin` freezes at the same point.
+- **NeoForge's loading call sites** (patches): the server calls `ServerModLoader.load(false)` between `Paths.get("server.properties")` and `new DedicatedServerSettings`. The client calls `ClientModLoader.begin()` after `Bootstrap.validate()` in `client/main/Main`, and `finish()` after `gameRenderer.registerPanoramaTextures(...)` in `Minecraft.<init>` (decompiled line 701).
+- **Fabric API's own initializers don't need to run before NeoForge mods.** All 16 `ModInitializer`s in Fabric API 26.2 register only Fabric's own payload types, registry sync attributes, ingredient and resource-condition types, reload listeners and listeners for later phases. Fabric's menu API walks existing registry entries before it listens for new ones, so it also sees entries registered before Fabric's mods initialize.
+- Mixin 0.17.4 accepts `compatibilityLevel` up to `JAVA_25`. MixinExtras (`@Local`, …) comes with Fabric Loader 0.19.5.
+- Loom 1.18's `splitEnvironmentSourceSets()` works with the unobfuscated plugin, and another project's `loom.mods` can reference it with `sourceSet('client', ':neoforge-api')`.
+- FML's mod order changes as mod ids are added (it comes from HashMap order, see above). With `lifecycle` installed it's `[lifecycle, minecraft, hello, metadata, neoforge]`.
 
 ---
 
@@ -285,22 +354,15 @@ Phase 3 replaces this with the proper ASM **reference scanner** in `cli`, which 
 
 ## 8. Next steps — Phase 2 (Layer A core)
 
-Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `testmods/`, compiled against the real NeoForge artifacts like `hello` is, and a log line or assertion checked on `runServer` (and later `runClient`). Add each testmod to `settings.gradle` and to `copyTestMods` in `loader/build.gradle`.
+Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `testmods/`, compiled against the real NeoForge artifacts like `hello` is, and a log line or assertion checked on `runServer` and `runClient` (§3). Add each testmod to `settings.gradle` and to `copyTestMods` in `loader/build.gradle`. Remember the rule from §1: nothing that runs in `begin` (construction, `RegisterEvent`, config loading) may rely on a Fabric initializer.
 
 1. ✅ **FML metadata and context** (done 2026-10-28; see §4 and Known gaps). Original task: port `neoforgespi` `IModInfo`/`IModFileInfo`/`IModFile` (only what mods use), `ModList` (`get()`, `isLoaded`, `getModContainerById`, `getModFileById`, `getMods`), `ModLoadingContext`, `FMLEnvironment`/`FMLLoader` (`getDist`, `isProduction`, `getCurrent()` as in 11.x), `FMLPaths` (`CONFIGDIR`, `GAMEDIR`, `MODSDIR`), `ModLoadingException`/`ModLoadingIssue`, and `InterModComms` with the IMC events. Restore the real `ModContainer` signatures (Shortcut 1). Make `NeoModDiscovery` read the full TOML.
-2. **Lifecycle ordering.** Match NeoForge's sequence on Fabric:
-   - Construct mods early in `onInitialize`, before other mods register content.
-   - `RegisterEvent` (step 3).
-   - `FMLCommonSetupEvent`.
-   - `FMLClientSetupEvent` (Fabric client entrypoint) or `FMLDedicatedServerSetupEvent`.
-   - `InterModEnqueue`/`Process`.
-   - `FMLLoadCompleteEvent`.
-
-   Add a `client` entrypoint to `loader`. `@EventBusSubscriber` auto-registration (`AutomaticEventSubscriber`) is already ported and runs in `FMLModContainer.constructMod`; it needs a bindings provider for game-bus events (Known gap 8). Test the client here (Known gap 11).
+2. ✅ **Lifecycle ordering** (done 2026-10-28; see "How mods load" in §4). It went in through mixins at NeoForge's call sites rather than Fabric entrypoints (the decision in §1), so `loader` lost its `main` entrypoint. Ported NeoForge's `CommonModLoader`/`ServerModLoader`/`ClientModLoader`, plus `NeoForge.EVENT_BUS` and the bindings provider (Known gap 8). Neoforge-api got a client source set. Testmods `lifecycle` and `fabricprobe`. The client runs under Xvfb.
 3. **Registries.** Port `DeferredRegister`/`DeferredHolder`/`DeferredBlock`/`DeferredItem`, `RegisterEvent`, `NewRegistryEvent`/`RegistryBuilder`, and `NeoForgeRegistries` (custom registries such as attachment types, fluid types, …).
-   - Fire `RegisterEvent` once per vanilla registry **before Fabric freezes them**. Find the freeze point in Fabric API `fabric-registry-sync-v0`.
+   - `RegisterEvent` goes in the "Registry initialization" placeholder in `CommonModLoader.begin`. Vanilla registries are open there, because Fabric API delays vanilla's freeze until after Fabric's mod init (§5) and `begin` runs before that.
+   - **`GameData.freezeData()` must not freeze vanilla registries.** NeoForge freezes at the end of `begin`, but on Fabric that would stop every Fabric mod from registering in `onInitialize`. Fabric API's own freeze, after Fabric's mod init, takes its place. `GameData.unfreezeData()` will find vanilla registries already open.
    - Custom registries must sync through Fabric registry sync.
-4. **Game bus and common events.** Create `NeoForge.EVENT_BUS` (a `BusBuilder` without the mod-bus marker). Implement in this order:
+4. **Game bus and common events.** `NeoForge.EVENT_BUS` exists since step 2 and starts at the end of `begin`. Implement in this order:
    - Server lifecycle events: `ServerStarting`, `ServerStarted`, `ServerStopping`, `RegisterCommandsEvent`.
    - Tick events, which map onto Fabric's lifecycle callbacks.
    - Level load/unload.
@@ -339,7 +401,7 @@ Hook the transformer into `VersionUnboundPreLaunch` before `addToClassPath`: det
 
 ## 10. Risks and open questions
 
-- **Registry freeze timing on Fabric** vs NeoForge's `RegisterEvent` (step 3). This is the most likely structural snag in Phase 2.
+- **Registry freeze timing on Fabric** vs NeoForge's `RegisterEvent` (step 3). Step 2 mostly settled this: `begin` runs while vanilla registries are open, and `lifecycle` checks that they're frozen by common setup. What's left is the `GameData.freezeData()` adaptation described in §8 step 3.
 - **Mixin conflicts.** Our hook mixins and the mods' own mixins hit the same vanilla methods; NeoForge mods assume NeoForge's patched code shape. Expect per-mod adjustments.
 - **Client rendering (Phase 5)** is the largest unknown. Create's Flywheel is a render engine, so Create's client side may need a fallback rather than a translation.
 - **Kotlin for Forge** (Cobblemon) is an FML language provider (`neoforgespi.language`); it needs a language-loader shim.

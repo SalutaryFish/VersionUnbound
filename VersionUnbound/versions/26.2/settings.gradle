@@ -18,3 +18,6 @@ include 'loader'
 // Hand-written NeoForge mods that each exercise one API area.
 include 'testmods:hello'
 include 'testmods:metadata'
+include 'testmods:lifecycle'
+// A Fabric mod that records when Fabric initializes its mods, for the lifecycle testmod to check.
+include 'testmods:fabricprobe'
