@@ -3,6 +3,9 @@
   "minVersion": "0.8",
   "package": "net.salutaryfish.versionunbound.neoforge.mixin",
   "compatibilityLevel": "JAVA_25",
+  "mixinextras": {
+    "minVersion": "0.5.5"
+  },
   "mixins": [
     "events.AbstractArrowMixin",
     "events.AbstractCubeMobMixin",
@@ -13,6 +16,7 @@
     "events.ChunkStatusTasksMixin",
     "events.CommandsMixin",
     "events.DefaultAttributesMixin",
+    "events.EnderDragonMixin",
     "events.EntityMixin",
     "events.FireworkRocketEntityMixin",
     "events.FishingHookMixin",

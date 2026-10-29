@@ -37,10 +37,12 @@ import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.HitResult;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
+import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
@@ -74,6 +76,14 @@ public class EventHooks {
     public static boolean checkSpawnPlacements(EntityType<?> entityType, ServerLevelAccessor level, EntitySpawnReason spawnType, BlockPos pos, RandomSource random, boolean defaultResult) {
         var event = new SpawnPlacementCheck(entityType, level, spawnType, pos, random, defaultResult);
         return NeoForge.EVENT_BUS.post(event).getPlacementCheckResult();
+    }
+
+    public static int getExperienceDrop(LivingEntity entity, @Nullable Player attackingPlayer, int originalExperience) {
+        LivingExperienceDropEvent event = new LivingExperienceDropEvent(entity, attackingPlayer, originalExperience);
+        if (NeoForge.EVENT_BUS.post(event).isCanceled()) {
+            return 0;
+        }
+        return event.getDroppedExperience();
     }
 
     public static int onItemUseStart(LivingEntity entity, ItemStack item, InteractionHand hand, int duration) {
@@ -125,6 +135,16 @@ public class EventHooks {
      */
     public static void fireItemPickupPost(ItemEntity itemEntity, Player player, ItemStack copy) {
         NeoForge.EVENT_BUS.post(new ItemEntityPickupEvent.Post(player, itemEntity, copy));
+    }
+
+    public static boolean canMountEntity(Entity entityMounting, Entity entityBeingMounted, boolean isMounting) {
+        boolean isCanceled = NeoForge.EVENT_BUS.post(new EntityMountEvent(entityMounting, entityBeingMounted, entityMounting.level(), isMounting)).isCanceled();
+
+        if (isCanceled) {
+            entityMounting.absSnapTo(entityMounting.getX(), entityMounting.getY(), entityMounting.getZ(), entityMounting.yRotO, entityMounting.xRotO);
+            return false;
+        } else
+            return true;
     }
 
     public static void onPlayerClone(Player player, Player oldPlayer, boolean wasDeath) {

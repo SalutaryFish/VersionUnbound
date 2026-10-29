@@ -8,7 +8,9 @@
   ],
   "mixins": [
     "AbstractHorseInvoker",
+    "EnderDragonInvoker",
     "EntityAccessor",
+    "ExperienceOrbAccessor",
     "LivingEntityInvoker",
     "ProjectileInvoker",
     "ShulkerInvoker"

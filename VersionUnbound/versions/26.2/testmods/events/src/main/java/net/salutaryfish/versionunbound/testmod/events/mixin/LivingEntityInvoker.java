@@ -2,7 +2,9 @@ package net.salutaryfish.versionunbound.testmod.events.mixin;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.gen.Invoker;
@@ -15,6 +17,9 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 public interface LivingEntityInvoker {
     @Invoker("dropAllDeathLoot")
     void events$dropAllDeathLoot(ServerLevel level, DamageSource source);
+
+    @Invoker("dropExperience")
+    void events$dropExperience(ServerLevel level, @Nullable Entity killer);
 
     @Accessor("useItemRemaining")
     void events$setUseItemRemaining(int ticks);

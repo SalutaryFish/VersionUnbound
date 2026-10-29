@@ -60,6 +60,7 @@ final class PlayerScenario {
     private final ItemScenario items;
     private final DestroyItemScenario destroyedItems;
     private final ProjectileScenario projectiles;
+    private final SurvivalScenario survival;
     private final TeleportScenario teleports;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
@@ -101,7 +102,7 @@ final class PlayerScenario {
     private boolean respawnEndConquered;
 
     PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
-            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports) {
+            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
@@ -110,6 +111,7 @@ final class PlayerScenario {
         this.destroyedItems = destroyedItems;
         this.projectiles = projectiles;
         this.teleports = teleports;
+        this.survival = survival;
     }
 
     boolean played() {
@@ -334,6 +336,7 @@ final class PlayerScenario {
         // pearls teleport the player too.
         projectiles.runWithPlayer(player, level, base);
         teleports.runWithPlayer(player, level, base);
+        survival.runWithPlayer(player, level, base);
 
         // Respawn as when leaving the End: the old player is replaced by a new one that keeps everything.
         ServerPlayer old = player;

@@ -1,6 +1,8 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
+import com.llamalad7.mixinextras.expression.Definition;
+import com.llamalad7.mixinextras.expression.Expression;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
@@ -50,6 +52,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -63,7 +66,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * jump their own way fire it in their own mixins). {@code ServerPlayer.die} fires the death event itself
  * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}). Also
  * {@code EntityTeleportEvent} in {@code randomTeleport} (for a consumed item, or an enderman), with NeoForge's overload
- * that takes the item.
+ * that takes the item; the air supply ({@code LivingBreatheEvent} and {@code LivingDrownEvent}, in
+ * {@code CommonHooks.onLivingBreathe}) and {@code LivingExperienceDropEvent}.
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
@@ -105,6 +109,12 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
 
     @Shadow
     protected abstract float getDamageAfterMagicAbsorb(DamageSource damageSource, float damage);
+
+    @Shadow
+    protected abstract int decreaseAirSupply(int currentSupply);
+
+    @Shadow
+    protected abstract int increaseAirSupply(int currentSupply);
 
     @Override
     public Stack<DamageContainer> versionunbound$damageContainers() {
@@ -428,5 +438,33 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
     @WrapWithCondition(method = "randomTeleport(DDDZ)Z", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;teleportTo(DDD)V", ordinal = 1))
     private boolean versionunbound$revertIfTeleported(LivingEntity self, double xo, double yo, double zo, @Share("teleported") LocalBooleanRef teleported) {
         return teleported.get();
+    }
+
+    // The air supply: CommonHooks.onLivingBreathe replaces vanilla's block (`if eyes in water {...} else if air is below
+    // the maximum {...}`), which NeoForge's patch skips with `if (false)`; here both conditions are made false.
+    @Inject(method = "baseTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;isEyeInFluid(Lnet/minecraft/tags/TagKey;)Z"))
+    private void versionunbound$breathe(CallbackInfo ci, @Local ServerLevel level) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        int airSupply = self.getAirSupply();
+        CommonHooks.onLivingBreathe(self, level, airSupply - this.decreaseAirSupply(airSupply), this.increaseAirSupply(airSupply) - airSupply);
+    }
+
+    @ModifyExpressionValue(method = "baseTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;isEyeInFluid(Lnet/minecraft/tags/TagKey;)Z"))
+    private boolean versionunbound$skipVanillaAirInWater(boolean eyeInWater) {
+        return false;
+    }
+
+    @Definition(id = "getAirSupply", method = "Lnet/minecraft/world/entity/LivingEntity;getAirSupply()I")
+    @Definition(id = "getMaxAirSupply", method = "Lnet/minecraft/world/entity/LivingEntity;getMaxAirSupply()I")
+    @Expression("this.getAirSupply() < this.getMaxAirSupply()")
+    @ModifyExpressionValue(method = "baseTick", at = @At("MIXINEXTRAS:EXPRESSION"))
+    private boolean versionunbound$skipVanillaAirRefill(boolean belowMaximum) {
+        return false;
+    }
+
+    @ModifyArg(method = "dropExperience", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/ExperienceOrb;award(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/phys/Vec3;I)V"), index = 2)
+    private int versionunbound$experienceDrop(int reward) {
+        LivingEntity self = (LivingEntity) (Object) this;
+        return EventHooks.getExperienceDrop(self, self.getLastHurtByPlayer(), reward);
     }
 }

@@ -13,13 +13,17 @@ import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -30,6 +34,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.GameMasterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -41,10 +46,12 @@ import net.neoforged.neoforge.event.entity.EntityAttributeModificationEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
+import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDrownEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
@@ -275,5 +282,54 @@ public class CommonHooks {
             newBuilder.combine(v);
             FORGE_ATTRIBUTES.put(k, newBuilder.build());
         });
+    }
+
+    // VersionUnbound: NeoForge asks the fluid types the entity's eyes are in (isEyeInFluidMatching, with the extensions'
+    // canDrownInFluidType and canBeRiddenUnderFluidType), which arrive with fluid types. With vanilla's fluids their
+    // defaults come down to vanilla's checks: water and lava are the fluids that aren't air, only water drowns (unless the
+    // entity can breathe under water), and only water makes a vehicle that dismounts under water drop its rider.
+    public static void onLivingBreathe(LivingEntity entity, ServerLevel level, int consumeAirAmount, int refillAirAmount) {
+        // Check things that vanilla considers to be air - these will cause the air supply to be increased.
+        boolean eyeInWater = entity.isEyeInFluid(FluidTags.WATER);
+        boolean isAir = !(eyeInWater || entity.isEyeInFluid(FluidTags.LAVA)) || entity.level().getBlockState(BlockPos.containing(entity.getX(), entity.getEyeY(), entity.getZ())).is(Blocks.BUBBLE_COLUMN);
+        boolean canBreathe = isAir;
+        // The following effects cause the entity to not drown, but do not cause the air supply to be increased.
+        if (!isAir && (MobEffectUtil.hasWaterBreathing(entity) || !(eyeInWater && !entity.canBreatheUnderwater()) || (entity instanceof Player player && player.getAbilities().invulnerable))) {
+            canBreathe = true;
+            refillAirAmount = 0;
+        }
+        LivingBreatheEvent breatheEvent = new LivingBreatheEvent(entity, canBreathe, consumeAirAmount, refillAirAmount);
+        NeoForge.EVENT_BUS.post(breatheEvent);
+        if (breatheEvent.canBreathe()) {
+            entity.setAirSupply(Math.min(entity.getAirSupply() + breatheEvent.getRefillAirAmount(), entity.getMaxAirSupply()));
+        } else {
+            entity.setAirSupply(entity.getAirSupply() - breatheEvent.getConsumeAirAmount());
+        }
+
+        if (entity.getAirSupply() <= 0) {
+            LivingDrownEvent drownEvent = new LivingDrownEvent(entity);
+            if (!NeoForge.EVENT_BUS.post(drownEvent).isCanceled() && drownEvent.isDrowning()) {
+                entity.setAirSupply(0);
+                Vec3 vec3 = entity.getDeltaMovement();
+
+                for (int i = 0; i < drownEvent.getBubbleCount(); ++i) {
+                    double d2 = entity.getRandom().nextDouble() - entity.getRandom().nextDouble();
+                    double d3 = entity.getRandom().nextDouble() - entity.getRandom().nextDouble();
+                    double d4 = entity.getRandom().nextDouble() - entity.getRandom().nextDouble();
+                    // VersionUnbound: sent to the clients. NeoForge adds the particles to the server level, where they do
+                    // nothing (vanilla's 26.2 air code runs on the server only), so none of the bubbles the event's
+                    // bubble count promises appear. A count of 0 makes the client use the offsets as the particle's speed.
+                    level.sendParticles(ParticleTypes.BUBBLE, entity.getX() + d2, entity.getY() + d3, entity.getZ() + d4, 0, vec3.x, vec3.y, vec3.z, 1.0);
+                }
+
+                if (drownEvent.getDamageAmount() > 0) {
+                    entity.hurtServer(level, entity.damageSources().drown(), drownEvent.getDamageAmount());
+                }
+            }
+        }
+
+        if (!isAir && entity.isPassenger() && entity.getVehicle() != null && eyeInWater && entity.getVehicle().dismountsUnderwater()) {
+            entity.stopRiding();
+        }
     }
 }

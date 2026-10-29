@@ -41,22 +41,26 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
+import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
+import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDrownEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEvent;
+import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
-import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
@@ -183,6 +187,13 @@ final class ServerEvents {
         bus.addListener(ProjectileImpactEvent.class, event -> {
             if (!event.getProjectile().level().isClientSide()) session().projectiles.impact(event);
         });
+        // Experience drops and breathing happen only on the server.
+        bus.addListener(LivingExperienceDropEvent.class, event -> session().survival.experience(event));
+        bus.addListener(LivingBreatheEvent.class, event -> session().survival.breathe(event));
+        bus.addListener(LivingDrownEvent.class, event -> session().survival.drown(event));
+        bus.addListener(EntityMountEvent.class, event -> {
+            if (!event.getLevel().isClientSide()) session().survival.mount(event);
+        });
         // Teleport events fire only on the server.
         for (Class<? extends EntityTeleportEvent> kind : List.of(EntityTeleportEvent.TeleportCommand.class, EntityTeleportEvent.SpreadPlayersCommand.class,
                 EntityTeleportEvent.EnderEntity.class, EntityTeleportEvent.EnderPearl.class, EntityTeleportEvent.ItemConsumption.class)) {
@@ -290,7 +301,8 @@ final class ServerEvents {
         private final DestroyItemScenario destroyedItems = new DestroyItemScenario(playerChecks);
         private final ProjectileScenario projectiles = new ProjectileScenario(checks, playerChecks);
         private final TeleportScenario teleports = new TeleportScenario(checks, playerChecks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports);
+        private final SurvivalScenario survival = new SurvivalScenario(checks, playerChecks);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -319,7 +331,7 @@ final class ServerEvents {
         private double frozenY;
         private final Map<Entity, int[]> entityTicks = Collections.synchronizedMap(new IdentityHashMap<>());
 
-        // The server tick the projectile and teleport scenarios ran at, -1 until then.
+        // The server tick the projectile, teleport and survival scenarios ran at, -1 until then.
         private int scenariosTick = -1;
 
         private final AtomicInteger playerTicksPre = new AtomicInteger();
@@ -506,6 +518,7 @@ final class ServerEvents {
                     int y = overworld.getMaxY() - 48;
                     projectiles.run(overworld, new Vec3(8.5, y, 4.5));
                     teleports.run(overworld, new BlockPos(8, y, 8));
+                    survival.run(overworld, new BlockPos(4, y - 8, 4));
                 }
             }
         }
@@ -558,7 +571,7 @@ final class ServerEvents {
             checks.check("entity ticks fired, Pre and Post", tickingTicks[0] > 0 && tickingTicks[0] == tickingTicks[1]);
             checks.check("canceling EntityTickEvent.Pre skips the tick", frozenTicks[0] > 0 && frozenTicks[1] == 0 && frozen.getY() == frozenY);
             checks.check("a passenger's ticks fire the entity tick events", rider.isPassenger() && riderTicks[0] > 0 && riderTicks[0] == riderTicks[1]);
-            checks.check("the projectile and teleport scenarios ran", scenariosTick > 0);
+            checks.check("the projectile, teleport and survival scenarios ran", scenariosTick > 0);
 
             // Leave the world as it was.
             living.finish();
