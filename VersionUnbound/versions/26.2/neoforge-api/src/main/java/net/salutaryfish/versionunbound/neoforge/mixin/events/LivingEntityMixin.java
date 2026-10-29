@@ -17,6 +17,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -44,7 +45,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * NeoForge's patch to {@code LivingEntity}, for the events it fires: the damage pipeline (incoming damage, damage pre
  * and post, around a stack of {@link DamageContainer}s), death (cancellable), drops (the death loot is captured and
- * added to the level unless the event is canceled), knockback, equipment changes, and item use (start, tick, stop and
+ * added to the level unless the event is canceled; {@code drop} adds to the capture too, which covers a player's
+ * inventory and tossed items), knockback, equipment changes, and item use (start, tick, stop and
  * finish). {@code ServerPlayer.die} fires the death event itself
  * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}).
  *
@@ -312,5 +314,15 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers {
         Collection<ItemEntity> drops = ((EntityDropsCapture) this).captureDrops(null);
         if (!CommonHooks.onLivingDrops(self, source, drops, lastHurtByPlayerMemoryTime > 0))
             drops.forEach(e -> self.level().addFreshEntity(e));
+    }
+
+    @WrapOperation(method = "drop(Lnet/minecraft/world/item/ItemStack;ZZ)Lnet/minecraft/world/entity/item/ItemEntity;", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;addFreshEntity(Lnet/minecraft/world/entity/Entity;)Z"))
+    private boolean versionunbound$captureDrop(Level level, Entity entity, Operation<Boolean> original) {
+        Collection<ItemEntity> drops = ((EntityDropsCapture) this).captureDrops();
+        if (drops != null) {
+            drops.add((ItemEntity) entity);
+            return true;
+        }
+        return original.call(level, entity);
     }
 }

@@ -1,13 +1,17 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.CommonHooks;
@@ -24,7 +28,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * NeoForge's patch to {@code Player}, for the events it fires: player ticks (wrapping {@code Player.tick()}, so inside
  * the entity tick events), entity interaction and attack (both cancellable, on both sides), and the damage pipeline in
- * the player's own {@code actuallyHurt} (see {@code LivingEntityMixin}). Not yet: {@code PlayerDestroyItemEvent} when an
+ * the player's own {@code actuallyHurt} (see {@code LivingEntityMixin}), and {@code ItemTossEvent} for items the player
+ * drops ({@code CommonHooks.onPlayerTossEvent} drops them through the drop capture). Not yet: {@code PlayerDestroyItemEvent} when an
  * interaction uses up the held item.
  */
 @Mixin(Player.class)
@@ -49,6 +54,11 @@ abstract class PlayerMixin {
     @Inject(method = "attack", at = @At("HEAD"), cancellable = true)
     private void versionunbound$attackEntity(Entity entity, CallbackInfo ci) {
         if (!CommonHooks.onPlayerAttackTarget((Player) (Object) this, entity)) ci.cancel();
+    }
+
+    @WrapOperation(method = "drop(Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/entity/item/ItemEntity;", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;drop(Lnet/minecraft/world/item/ItemStack;ZZ)Lnet/minecraft/world/entity/item/ItemEntity;"))
+    private ItemEntity versionunbound$toss(Player player, ItemStack itemStack, boolean randomly, boolean thrownFromHand, Operation<ItemEntity> original) {
+        return CommonHooks.onPlayerTossEvent(player, itemStack, randomly, thrownFromHand);
     }
 
     /**

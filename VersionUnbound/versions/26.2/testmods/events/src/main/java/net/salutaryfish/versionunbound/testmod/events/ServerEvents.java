@@ -39,6 +39,8 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
+import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
@@ -49,9 +51,14 @@ import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.level.ChunkDataEvent;
+import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
+import net.neoforged.neoforge.event.level.ChunkWatchEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
@@ -152,6 +159,25 @@ final class ServerEvents {
                 if (!event.getEntity().level().isClientSide()) session().living.useItem(event);
             });
         }
+        // Items and chunk data: these fire only on the server.
+        bus.addListener(ItemExpireEvent.class, event -> session().items.expire(event));
+        bus.addListener(ItemEntityPickupEvent.Pre.class, event -> session().items.pickupPre(event));
+        bus.addListener(ItemEntityPickupEvent.Post.class, event -> session().items.pickupPost(event));
+        bus.addListener(ItemTossEvent.class, event -> {
+            if (!event.getPlayer().level().isClientSide()) session().items.toss(event);
+        });
+        bus.addListener(ChunkEvent.Load.class, event -> {
+            if (event.getLevel() instanceof ServerLevel) session().chunks.load(event);
+        });
+        bus.addListener(ChunkEvent.Unload.class, event -> {
+            if (event.getLevel() instanceof ServerLevel) session().chunks.unload(event);
+        });
+        bus.addListener(ChunkDataEvent.Load.class, event -> session().chunks.dataLoad(event));
+        bus.addListener(ChunkDataEvent.Save.class, event -> session().chunks.dataSave(event));
+        bus.addListener(ChunkTicketLevelUpdatedEvent.class, event -> session().chunks.ticketLevelUpdated(event));
+        bus.addListener(ChunkWatchEvent.Watch.class, event -> session().chunks.watch(event));
+        bus.addListener(ChunkWatchEvent.Sent.class, event -> session().chunks.watch(event));
+        bus.addListener(ChunkWatchEvent.UnWatch.class, event -> session().chunks.watch(event));
         bus.addListener(PlayerTickEvent.Pre.class, event -> {
             if (event.getEntity() instanceof ServerPlayer) session().playerTick(true);
         });
@@ -228,7 +254,9 @@ final class ServerEvents {
         private Entity dropsCanceled;
         private final DamageScenario damage = new DamageScenario(checks);
         private final LivingScenario living = new LivingScenario(checks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage);
+        private final ItemScenario items = new ItemScenario(checks, playerChecks, joins);
+        private final ChunkScenario chunks = new ChunkScenario(checks, playerChecks);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -284,6 +312,7 @@ final class ServerEvents {
         void livingDrops(LivingDropsEvent event) {
             drops.put(event.getEntity(), List.copyOf(event.getDrops()));
             if (event.getEntity() == dropsCanceled) event.setCanceled(true);
+            players.livingDrops(event);
         }
 
         private int count(Map<Entity, Integer> events, Entity entity) {
@@ -364,6 +393,7 @@ final class ServerEvents {
             ServerLevel overworld = server.overworld();
             overworld.setChunkForced(0, 0, true);
             overworld.getChunk(0, 0);
+            chunks.started(overworld, newWorld);
             double y = overworld.getMaxY() - 8;
             ticking = spawnArmorStand(overworld, 4.5, y);
             frozen = spawnArmorStand(overworld, 9.5, y);
@@ -400,6 +430,7 @@ final class ServerEvents {
 
             damage.run(overworld, 12.5, y, 9.5);
             living.run(overworld, 6.5, y, 12.5);
+            items.run(overworld, 2.5, y, 12.5);
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {
@@ -483,6 +514,7 @@ final class ServerEvents {
 
             // Leave the world as it was.
             living.finish();
+            items.finish(server.overworld());
             ticking.discard();
             frozen.discard();
             rider.discard();
@@ -524,9 +556,11 @@ final class ServerEvents {
                         trace.indexOf("shuttingDown") > stopping && trace.indexOf("shuttingDown") < trace.indexOf(unloads.get(0)));
             }
             checks.check("server stopped comes last", stopped == trace.size() - 1);
+            chunks.stopped();
             checks.summarize();
 
             if (players.played()) {
+                chunks.finishPlayer();
                 playerChecks.check("server player ticks fired, Pre and Post in turn",
                         playerTicksPre.get() > 0 && playerTicksAlternate && playerTicksPre.get() == playerTicksPost.get());
                 players.finish();

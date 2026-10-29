@@ -15,6 +15,7 @@ inject-interface	net/minecraft/core/HolderLookup$RegistryLookup$Delegate	net/sal
 inject-interface	net/minecraft/util/TriState	net/salutaryfish/versionunbound/neoforge/patches/TriStateExtension
 inject-interface	net/minecraft/world/level/entity/PersistentEntitySectionManager	net/salutaryfish/versionunbound/neoforge/patches/PersistentEntitySectionManagerExtension<TT;>
 inject-interface	net/minecraft/util/random/WeightedList$Builder	net/salutaryfish/versionunbound/neoforge/patches/WeightedListBuilderExtension<TE;>
+inject-interface	net/minecraft/world/level/chunk/ChunkAccess	net/salutaryfish/versionunbound/neoforge/patches/ChunkAccessExtension
 
 # NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
 # NeoForge's patch replaces with GameData's).

@@ -3,7 +3,12 @@
   "minVersion": "0.8",
   "package": "net.salutaryfish.versionunbound.testmod.events.mixin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["MinecraftAccessor"],
+  "client": [
+    "MinecraftAccessor"
+  ],
+  "mixins": [
+    "LivingEntityInvoker"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

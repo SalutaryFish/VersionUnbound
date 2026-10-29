@@ -6,6 +6,7 @@
 package net.neoforged.neoforge.common;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import java.util.Collection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -30,6 +31,7 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
+import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
@@ -40,6 +42,7 @@ import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
+import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import org.jspecify.annotations.Nullable;
 
 // VersionUnbound: ported a feature at a time, like EventHooks. The methods here are verbatim (deviations are marked) and
@@ -112,6 +115,25 @@ public class CommonHooks {
 
     public static boolean onLivingDrops(LivingEntity entity, DamageSource source, Collection<ItemEntity> drops, boolean recentlyHit) {
         return NeoForge.EVENT_BUS.post(new LivingDropsEvent(entity, source, drops, recentlyHit)).isCanceled();
+    }
+
+    @Nullable
+    public static ItemEntity onPlayerTossEvent(Player player, ItemStack item, boolean dropAround, boolean includeName) {
+        // VersionUnbound: captureDrops comes from EntityMixin through EntityDropsCapture until IEntityExtension is ported
+        ((EntityDropsCapture) player).captureDrops(Lists.newArrayList());
+        ItemEntity ret = player.drop(item, dropAround, includeName);
+        ((EntityDropsCapture) player).captureDrops(null);
+
+        if (ret == null)
+            return null;
+
+        ItemTossEvent event = new ItemTossEvent(ret, player);
+        if (NeoForge.EVENT_BUS.post(event).isCanceled())
+            return null;
+
+        if (!player.level().isClientSide())
+            player.level().addFreshEntity(event.getEntity());
+        return event.getEntity();
     }
 
     /**

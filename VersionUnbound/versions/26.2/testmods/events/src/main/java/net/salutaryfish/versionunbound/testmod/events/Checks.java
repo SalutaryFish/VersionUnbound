@@ -61,6 +61,6 @@ final class Checks {
 
     @FunctionalInterface
     interface CheckedCondition {
-        boolean test() throws Exception;
+        boolean test() throws Throwable;
     }
 }

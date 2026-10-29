@@ -12,6 +12,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
@@ -22,6 +25,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
@@ -33,8 +37,9 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.MinecraftAccessor;
  * Client-side checks, for a client that joins a world (singleplayer or a server). After {@value #ACT_AT} client ticks in
  * the level (once the server's player scenario, with its respawn, is over), the client drives its own interaction code:
  * right click on a block and with the hand, left click on a block, a block break, and clicks at nothing; some of these
- * canceled. At {@value #LEAVE_AT} ticks the first checks run and the client leaves the world; the logging-out and unload
- * checks follow on the next tick, then the summary. Every listener runs on the render thread; events for the integrated
+ * canceled. At {@value #LEAVE_AT} ticks the first checks run (including a chunk the client is made to drop, as when the
+ * server forgets it) and the client leaves the world; the logging-out and unload checks follow on the next tick, then
+ * the summary. Every listener runs on the render thread; events for the integrated
  * server's levels and entities are filtered out.
  */
 final class ClientEvents {
@@ -68,6 +73,9 @@ final class ClientEvents {
     private static int leftClickEmpty;
     private static boolean cancelClicks;
     private static boolean wrongSide;
+    private static int chunkLoads;
+    private static boolean chunkLoadsConsistent = true;
+    private static ChunkEvent.Unload chunkUnload;
 
     private static final Set<LocalPlayer> joinedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> leftPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -156,6 +164,14 @@ final class ClientEvents {
             breakPos = event.getPos();
             event.setCanceled(true);
         });
+        bus.addListener(ChunkEvent.Load.class, event -> {
+            if (!(event.getLevel() instanceof ClientLevel level)) return;
+            chunkLoads++;
+            if (event.isNewChunk() || event.getChunk().getLevel() != level) chunkLoadsConsistent = false;
+        });
+        bus.addListener(ChunkEvent.Unload.class, event -> {
+            if (event.getLevel() instanceof ClientLevel) chunkUnload = event;
+        });
         bus.addListener(PlayerInteractEvent.RightClickEmpty.class, event -> rightClickEmpty++);
         bus.addListener(PlayerInteractEvent.LeftClickEmpty.class, event -> leftClickEmpty++);
     }
@@ -227,6 +243,16 @@ final class ClientEvents {
                 clone != null && clone.getOldPlayer() != clone.getNewPlayer() && clone.getNewPlayer() == minecraft.player);
         CHECKS.check("the local player joined the client level, and the old one left it on the respawn",
                 joinedPlayers.contains(minecraft.player) && clone != null && leftPlayers.contains(clone.getOldPlayer()));
+
+        CHECKS.check("ChunkEvent.Load fires for the chunks the server sends, never as new chunks", chunkLoads > 0 && chunkLoadsConsistent);
+        // A chunk two chunks east of the player, dropped as ClientboundForgetLevelChunkPacket's handler does.
+        ClientLevel level = minecraft.level;
+        ChunkPos center = minecraft.player.chunkPosition();
+        ChunkPos east = new ChunkPos(center.x() + 2, center.z());
+        LevelChunk dropped = level.getChunkSource().getChunk(east.x(), east.z(), ChunkStatus.FULL, false);
+        level.getChunkSource().drop(east);
+        CHECKS.check("ChunkEvent.Unload fires when the client drops a chunk",
+                dropped != null && chunkUnload != null && chunkUnload.getChunk() == dropped && chunkUnload.getLevel() == level);
     }
 
     private static void leftWorld(Minecraft minecraft) {

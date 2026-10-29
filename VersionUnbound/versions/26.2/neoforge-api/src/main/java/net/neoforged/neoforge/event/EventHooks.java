@@ -12,25 +12,35 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ChunkHolder;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
+import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
+import net.neoforged.neoforge.event.level.ChunkWatchEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.jspecify.annotations.Nullable;
 
 // VersionUnbound: ported a feature at a time, like NeoForgeMod. The methods here are verbatim and in NeoForge's order;
 // the others arrive with their events (player, interaction and block events, living and entity events, spawning, items,
@@ -56,12 +66,60 @@ public class EventHooks {
         return event.getResultStack();
     }
 
+    public static int onItemExpire(ItemEntity entity) {
+        ItemExpireEvent event = new ItemExpireEvent(entity);
+        NeoForge.EVENT_BUS.post(event);
+        return event.getExtraLife();
+    }
+
+    /**
+     * Called in {@link ItemEntity#playerTouch(Player)} before any other processing occurs.
+     * <p>
+     * Fires {@link ItemEntityPickupEvent.Pre} and returns the event.
+     * 
+     * @param itemEntity The item entity that a player collided with
+     * @param player     The player that collided with the item entity
+     */
+    public static ItemEntityPickupEvent.Pre fireItemPickupPre(ItemEntity itemEntity, Player player) {
+        return NeoForge.EVENT_BUS.post(new ItemEntityPickupEvent.Pre(player, itemEntity));
+    }
+
+    /**
+     * Called in {@link ItemEntity#playerTouch(Player)} after an item was successfully picked up.
+     * <p>
+     * Fires {@link ItemEntityPickupEvent.Post}.
+     * 
+     * @param itemEntity The item entity that a player collided with
+     * @param player     The player that collided with the item entity
+     * @param copy       A copy of the item entity's item stack before the pickup
+     */
+    public static void fireItemPickupPost(ItemEntity itemEntity, Player player, ItemStack copy) {
+        NeoForge.EVENT_BUS.post(new ItemEntityPickupEvent.Post(player, itemEntity, copy));
+    }
+
     public static void onPlayerClone(Player player, Player oldPlayer, boolean wasDeath) {
         NeoForge.EVENT_BUS.post(new PlayerEvent.Clone(player, oldPlayer, wasDeath));
     }
 
     public static boolean onCreateWorldSpawn(Level level, ServerLevelData settings) {
         return NeoForge.EVENT_BUS.post(new LevelEvent.CreateSpawnPosition(level, settings)).isCanceled();
+    }
+
+    public static void fireChunkTicketLevelUpdated(ServerLevel level, long chunkPos, int oldTicketLevel, int newTicketLevel, @Nullable ChunkHolder chunkHolder) {
+        if (oldTicketLevel != newTicketLevel)
+            NeoForge.EVENT_BUS.post(new ChunkTicketLevelUpdatedEvent(level, chunkPos, oldTicketLevel, newTicketLevel, chunkHolder));
+    }
+
+    public static void fireChunkWatch(ServerPlayer entity, LevelChunk chunk, ServerLevel level) {
+        NeoForge.EVENT_BUS.post(new ChunkWatchEvent.Watch(entity, chunk, level));
+    }
+
+    public static void fireChunkSent(ServerPlayer entity, LevelChunk chunk, ServerLevel level) {
+        NeoForge.EVENT_BUS.post(new ChunkWatchEvent.Sent(entity, chunk, level));
+    }
+
+    public static void fireChunkUnWatch(ServerPlayer entity, ChunkPos chunkpos, ServerLevel level) {
+        NeoForge.EVENT_BUS.post(new ChunkWatchEvent.UnWatch(entity, chunkpos, level));
     }
 
     public static void onCommandRegister(CommandDispatcher<CommandSourceStack> dispatcher, Commands.CommandSelection environment, CommandBuildContext context) {

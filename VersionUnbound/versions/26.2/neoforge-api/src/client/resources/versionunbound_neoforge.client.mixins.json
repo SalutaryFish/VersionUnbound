@@ -6,6 +6,7 @@
   "client": [
     "MainMixin",
     "MinecraftMixin",
+    "events.ClientChunkCacheMixin",
     "events.ClientLevelEntityCallbacksMixin",
     "events.ClientLevelMixin",
     "events.ClientPacketListenerMixin",

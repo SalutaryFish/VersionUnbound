@@ -1,9 +1,13 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.neoforged.neoforge.common.CommonHooks;
@@ -17,7 +21,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * NeoForge's patch to {@code ServerPlayer}, for the events it fires: death (cancellable; the player overrides
  * {@code LivingEntity.die}), travel to dimension (cancellable, at the head of every teleport), changed dimension (at the
- * end of a teleport to another level) and clone.
+ * end of a teleport to another level), clone, and tossing the selected item ({@code ItemTossEvent}, as in
+ * {@code PlayerMixin}).
  */
 @Mixin(ServerPlayer.class)
 abstract class ServerPlayerMixin {
@@ -43,5 +48,17 @@ abstract class ServerPlayerMixin {
     @Inject(method = "restoreFrom", at = @At("TAIL"))
     private void versionunbound$clone(ServerPlayer oldPlayer, boolean restoreAll, CallbackInfo ci) {
         EventHooks.onPlayerClone((ServerPlayer) (Object) this, oldPlayer, !restoreAll);
+    }
+
+    // NeoForge also asks the item (onDroppedByPlayer, the item stack extension, Phase 2 step 5; vanilla's answer is yes).
+    @Inject(method = "drop(Z)V", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$dropNothing(boolean all, CallbackInfo ci) {
+        ItemStack selected = ((ServerPlayer) (Object) this).getInventory().getSelectedItem();
+        if (selected.isEmpty()) ci.cancel();
+    }
+
+    @WrapOperation(method = "drop(Z)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;drop(Lnet/minecraft/world/item/ItemStack;ZZ)Lnet/minecraft/world/entity/item/ItemEntity;"))
+    private ItemEntity versionunbound$tossSelected(ServerPlayer player, ItemStack removed, boolean randomly, boolean thrownFromHand, Operation<ItemEntity> original) {
+        return CommonHooks.onPlayerTossEvent(player, removed, randomly, thrownFromHand);
     }
 }

@@ -1,6 +1,7 @@
 package net.salutaryfish.versionunbound.testmod.events;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
@@ -16,28 +17,36 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.NoteBlock;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
+import net.salutaryfish.versionunbound.testmod.events.mixin.LivingEntityInvoker;
 
 /**
- * Server-side player checks. When a player logs in, the scenario waits {@value #DELAY} ticks and then drives the server's
+ * Server-side player checks. When a player logs in, the scenario waits until its client has loaded the level, then
+ * {@value #DELAY} more ticks, and then drives the server's
  * own code paths for that player, the ones the network handler calls: clicking and breaking blocks, using blocks and
- * items, interacting with and attacking entities, teleporting within the overworld, to the nether and back, and finally
+ * items, interacting with and attacking entities, a canceled death and the death drops, picking up and tossing items,
+ * teleporting within the overworld, to the nether and back, and finally
  * respawning as if from the End. The listeners below cancel or redirect some of these by position or target.
  */
 final class PlayerScenario {
@@ -47,6 +56,7 @@ final class PlayerScenario {
     private final Map<Entity, Integer> joins;
     private final Map<Entity, Integer> leaves;
     private final DamageScenario damage;
+    private final ItemScenario items;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
 
@@ -65,6 +75,8 @@ final class PlayerScenario {
     private boolean cancelRightClickItem;
     private boolean cancelDeath;
     private boolean deathCanceled;
+    private boolean cancelPlayerDrops;
+    private List<ItemEntity> playerDrops;
 
     private final List<BlockPos> leftClicks = new ArrayList<>();
     private PlayerInteractEvent.LeftClickBlock.Action leftClickAction;
@@ -84,11 +96,12 @@ final class PlayerScenario {
     private Player respawned;
     private boolean respawnEndConquered;
 
-    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage) {
+    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
         this.damage = damage;
+        this.items = items;
     }
 
     boolean played() {
@@ -109,7 +122,9 @@ final class PlayerScenario {
     }
 
     void serverTickEnd() {
-        if (ticksUntilRun > 0 && --ticksUntilRun == 0) {
+        // The countdown starts once the client has loaded the level: until then the player takes no damage
+        // (ServerPlayer.isInvulnerableTo), so a slow client would make the kill and the hit below do nothing.
+        if (ticksUntilRun > 0 && player.connection.hasClientLoaded() && --ticksUntilRun == 0) {
             run();
         }
     }
@@ -161,6 +176,12 @@ final class PlayerScenario {
             player.setHealth(1.0F);
             deathCanceled = true;
         }
+    }
+
+    void livingDrops(LivingDropsEvent event) {
+        if (event.getEntity() != player) return;
+        playerDrops = List.copyOf(event.getDrops());
+        if (cancelPlayerDrops) event.setCanceled(true);
     }
 
     void attack(AttackEntityEvent event) {
@@ -266,12 +287,16 @@ final class PlayerScenario {
             level.removeBlock(pos, false);
         }
 
+        // Picking up and tossing items (ItemScenario).
+        items.runWithPlayer(player, level, base);
+
         // A death the listener cancels (ServerPlayer overrides LivingEntity.die).
         cancelDeath = true;
         player.kill(level);
         cancelDeath = false;
         checks.check("LivingDeathEvent fires for a player, and canceling it keeps the player alive", deathCanceled && player.isAlive());
         player.setHealth(player.getMaxHealth());
+        deathDrops(level);
 
         // A hit the player takes (Player has its own actuallyHurt); the canceled death left invulnerability ticks.
         if (!player.isCreative() && !player.isSpectator()) {
@@ -306,6 +331,62 @@ final class PlayerScenario {
         checks.check("PlayerRespawnEvent fires for the new player", respawned == player && respawnEndConquered);
         checks.check("on respawn, the old player leaves the level and the new one joins it",
                 leaves.getOrDefault(old, 0) == 3 && joins.getOrDefault(player, 0) == 1);
+    }
+
+    /**
+     * The death drops as {@code die} makes them ({@code dropAllDeathLoot}), from a known inventory: the player's inventory
+     * drops through {@code LivingEntity.drop}, which NeoForge captures for {@code LivingDropsEvent}. Once with the drops
+     * canceled, then landing in the level. The player's own inventory, experience level (it would drop as orbs) and
+     * {@code keepInventory} are put back afterwards.
+     */
+    private void deathDrops(ServerLevel level) {
+        Inventory inventory = player.getInventory();
+        List<ItemStack> savedInventory = new ArrayList<>();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            savedInventory.add(inventory.getItem(i).copy());
+        }
+        int savedLevel = player.experienceLevel;
+        boolean keepInventory = level.getGameRules().get(GameRules.KEEP_INVENTORY);
+        if (keepInventory) level.getGameRules().set(GameRules.KEEP_INVENTORY, false, level.getServer());
+        player.experienceLevel = 0;
+        try {
+            deathInventory(inventory);
+            cancelPlayerDrops = true;
+            ((LivingEntityInvoker) player).events$dropAllDeathLoot(level, level.damageSources().generic());
+            cancelPlayerDrops = false;
+            List<ItemEntity> withheld = playerDrops;
+            checks.check("a player's inventory goes through LivingDropsEvent on death, and canceling keeps it out of the level",
+                    isDeathInventory(withheld) && withheld.stream().allMatch(item -> joins.getOrDefault(item, 0) == 0) && inventory.isEmpty());
+
+            deathInventory(inventory);
+            playerDrops = null;
+            ((LivingEntityInvoker) player).events$dropAllDeathLoot(level, level.damageSources().generic());
+            List<ItemEntity> dropped = playerDrops;
+            checks.check("a player's death drops land in the level when LivingDropsEvent isn't canceled",
+                    isDeathInventory(dropped) && dropped.stream().allMatch(item -> joins.getOrDefault(item, 0) == 1) && inventory.isEmpty());
+            if (dropped != null) dropped.forEach(Entity::discard);
+        } finally {
+            cancelPlayerDrops = false;
+            inventory.clearContent();
+            for (int i = 0; i < savedInventory.size(); i++) {
+                inventory.setItem(i, savedInventory.get(i));
+            }
+            player.experienceLevel = savedLevel;
+            if (keepInventory) level.getGameRules().set(GameRules.KEEP_INVENTORY, true, level.getServer());
+        }
+    }
+
+    private void deathInventory(Inventory inventory) {
+        inventory.clearContent();
+        inventory.setItem(0, new ItemStack(Items.EMERALD, 3));
+        player.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
+    }
+
+    /** Exactly the inventory {@link #deathInventory} made, as item entities: the stack in a slot and the helmet. */
+    private static boolean isDeathInventory(Collection<ItemEntity> drops) {
+        return drops != null && drops.size() == 2
+                && drops.stream().anyMatch(item -> item.getItem().is(Items.EMERALD) && item.getItem().getCount() == 3)
+                && drops.stream().anyMatch(item -> item.getItem().is(Items.DIAMOND_HELMET));
     }
 
     private InteractionResult useOn(ServerLevel level, BlockPos pos) {
