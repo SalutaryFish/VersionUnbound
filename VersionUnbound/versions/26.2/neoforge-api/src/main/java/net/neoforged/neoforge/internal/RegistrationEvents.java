@@ -5,15 +5,18 @@
 
 package net.neoforged.neoforge.internal;
 
+import net.neoforged.neoforge.registries.RegistryManager;
+
 public class RegistrationEvents {
     static void init() {
-        // VersionUnbound: none of these are ported yet. Each comes back with its feature: data maps and component
-        // modifiers with registries (Phase 2 step 3), cauldron fluids and capabilities in step 9.
+        // VersionUnbound: the calls commented out here come back with their features: cauldron fluids and capabilities in
+        // Phase 2 step 9, forced chunks with the game events (step 4), component modifiers and POI extension with the
+        // extension interfaces (step 5).
         // CauldronFluidContent.init(); // must be before capability event
         // CauldronInteractions.registerCustomInteractions();
         // CapabilityHooks.init(); // must be after cauldron event
         // ForcedChunkManager.init();
-        // RegistryManager.initDataMaps();
+        RegistryManager.initDataMaps();
         // DataComponentModifiers.init();
         // PoiTypeExtender.extendPoiTypes();
     }

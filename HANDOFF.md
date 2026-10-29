@@ -1,6 +1,6 @@
 # VersionUnbound — Handoff
 
-State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 steps 1 (FML metadata and context) and 2 (lifecycle ordering) are done. **Next: Phase 2 step 3, registries** (§8).
+State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 steps 1 (FML metadata and context), 2 (lifecycle ordering) and 3 (registries) are done. **Next: Phase 2 step 4, game bus and common events** (§8).
 
 The full approved plan is at `/home/username/.claude/plans/alright-our-goal-is-abstract-sparrow.md`. This file is self-contained, so you don't need the plan to continue.
 
@@ -23,7 +23,7 @@ Decisions the user made (don't re-ask):
 Phases:
 - **0. Workspace** ✅
 - **1. Loader spike** ✅
-- **2. Layer A core** ← in progress (steps 1–2 done, step 3 next)
+- **2. Layer A core** ← in progress (steps 1–3 done, step 4 next)
 - **3. Layer B MVP.** Milestone: the unmodified Chunky 1.21.1 jar runs a pregen on a Fabric 26.2 server.
 - **4. Content mods, server side:** Toms Storage → FarmersDelight → KaleidoscopeCookery → DynamicTrees.
 - **5. Client shims.** GUI, renderers and models; the largest open-ended phase.
@@ -82,6 +82,7 @@ Key files inside the NeoForge 26.2 clone:
   - Piping `stop` into Gradle works: stdin is forwarded to the server.
   - **The client doesn't exit on its own.** Once `[lifecycle] all N checks passed` (or `FAILED`) shows up, kill the game JVM: the `java` process whose `/proc/<pid>/cmdline` contains `net.fabricmc.devlaunchinjector.Main` (pick it with `pgrep -x java`). Gradle then reports exit value 143 and BUILD FAILED, which is expected. Don't use `pkill -f` with that pattern from a script: it also matches the shell running the script and kills it.
   - Under Xvfb the client renders with Mesa llvmpipe (OpenGL 4.6). Mesa's "vulkan: No DRI3 support" note is harmless.
+  - **Client joining the dev server** (checks registry sync end to end): start `runServer`, wait for "Done (", then run the client with `./gradlew :loader:runClient --args='--quickPlayMultiplayer localhost:25565'`. Two local settings in the git-ignored `loader/run/` make this work: `online-mode=false` and `enforce-secure-profile=false` in `server.properties` (the dev client is offline), and `onboardAccessibility:false` in `options.txt` (otherwise vanilla shows the accessibility onboarding screen first, and quick play waits until someone dismisses it). Stop the client by killing the JVM whose cmdline contains `fabric.dli.env=client`; the server's "left the game" line then tells the stop loop to send `stop`.
 - **`mc-src <ver>...`** decompiles vanilla into `src/mc-<ver>/` and caches downloads in `~/.cache/mc-src/`.
   - **Obfuscated versions** (e.g. 1.21.1) go through four steps:
     1. AutoRenamingTool applies Mojang's mappings (`--reverse`).
@@ -114,22 +115,39 @@ Toolchain:
 All versions are in `gradle.properties`, including the NeoForge ones: `neoforge_version=26.2.0.93`, `neoform_version=2`, `fml_version=11.0.16`, `eventbus_version=8.0.5`, `typetools_version=0.6.3`, `mergetool_version=2.0.7`, `nightconfig_version=3.9.0`, `maven_artifact_version=3.9.16`. Group: `net.salutaryfish.versionunbound` (matches the user's other projects).
 
 ```
-settings.gradle      includes neoforge-api, loader, testmods:{hello,metadata,lifecycle,fabricprobe}
-build.gradle         root: applies loom (apply false); subprojects get java, NeoForged maven, Java 25
+settings.gradle      includes neoforge-api, loader, testmods:{hello,metadata,lifecycle,registries,fabricprobe}
+build.gradle         root: applies loom (apply false); subprojects get java, NeoForged maven, Java 25. Task
+                     generateTestmodClassTweaker writes testmods/neoforge-compile.classtweaker (see testmods below).
 neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
   build.gradle       loom splitEnvironmentSourceSets(): client-only code goes in src/client, as in NeoForge, so common code
                      can't reference client classes. api+include: net.neoforged:bus, mergetool:api (Dist/OnlyIn),
                      night-config toml (+core), maven-artifact; include typetools. processResources expands
                      neoforge_version/neoform_version into fabric.mod.json (custom "versionunbound:implements"); the
-                     loader reads it to build FML's VersionInfo.
+                     loader reads it to build FML's VersionInfo. accessWidenerPath = the class tweaker below.
   src/main/java/net/neoforged/{fml,neoforgespi}/   FML 11.0.16: 102 files verbatim, 9 adapted (see below)
-  src/main/java/net/neoforged/neoforge/            NeoForge 26.2: common/NeoForge (the game bus), internal/{NeoForgeBindings,
-                                                   CommonModLoader, RegistrationEvents}, server/loading/ServerModLoader
+  src/main/java/net/neoforged/neoforge/            NeoForge 26.2: common/NeoForge (the game bus), common/NeoForgeMod (NeoForge's
+                                                   own mod, a growing partial port), common/extensions/{IHolderExtension,
+                                                   IHolderSetExtension}, internal/{NeoForgeBindings, CommonModLoader,
+                                                   RegistrationEvents}, server/loading/ServerModLoader, and since step 3
+                                                   registries/ (+ callback/, datamaps/ types only, holdersets/): 45 files,
+                                                   31 verbatim (deviations below)
   src/client/java/net/neoforged/neoforge/          client/loading/ClientModLoader
-  src/main/java/net/salutaryfish/versionunbound/neoforge/mixin/server/MainMixin   versionunbound_neoforge.mixins.json ("server")
+  src/main/java/net/salutaryfish/versionunbound/neoforge/
+    registries/MappedRegistryExtension   stands in for NeoForge's BaseMappedRegistry superclass (setSync, setMaxId, getDataMaps)
+    patches/                             members NeoForge's patches add to vanilla classes: IdentifierExtension (compareNamespaced)
+                                         and RegistryLookupExtension (+$Delegate: data map getters), injected as interfaces with
+                                         default methods; RegistryOpsPatch (static retrieveRegistryLookup, called instead)
+    mixin/registries/                    NeoForge's registry patches as mixins, in versionunbound_neoforge.mixins.json ("mixins"):
+                                         MappedRegistryMixin, HolderReferenceMixin, HolderSetNamedMixin, RegistryMixin,
+                                         RegistryLoadTaskMixin, PoiTypesMixin, BuiltInRegistriesMixin, BuiltInRegistriesAccessor
+    mixin/server/MainMixin               versionunbound_neoforge.mixins.json ("server")
   src/client/java/net/salutaryfish/versionunbound/neoforge/client/mixin/{MainMixin,MinecraftMixin}
                                                    versionunbound_neoforge.client.mixins.json; these 3 mixins are NeoForge's
                                                    loading hooks (the sequence is below)
+  src/main/resources/versionunbound_neoforge.classtweaker   un-seals Holder (extendable), injects NeoForge's extension
+                                                   interfaces (IRegistryExtension, IHolderExtension, IHolderSetExtension) and the
+                                                   patches/ interfaces, widens RegistryOps.lookupProvider and PoiTypes.TYPE_BY_STATE.
+                                                   Loom applies it at compile time, Fabric Loader at run time.
   src/main/resources/META-INF/services/net.neoforged.fml.IBindingsProvider   → NeoForgeBindings (verbatim)
   src/main/resources/lang/*.json                   FML's translations for ModLoadingIssue keys (verbatim)
 loader/              Fabric mod id `versionunbound`, entrypoint preLaunch only
@@ -139,6 +157,7 @@ loader/              Fabric mod id `versionunbound`, entrypoint preLaunch only
   src/main/java/net/salutaryfish/versionunbound/loader/
     VersionUnboundPreLaunch.java   FMLLoader.create(Knot, dist, production, gameDir, versions) → NeoModDiscovery.findModJars
                                    → FMLLoader.discoverMods(...) → addToClassPath(accepted jars) → NeoMixinConfigs.register
+                                   → FMLLoader.startModScan() (must come last, see §5 on Mixin's config set)
     NeoModDiscovery.java           lists mods/*.jar that contain META-INF/neoforge.mods.toml (reading them is FML's job)
     NeoMixinConfigs.java           FML's MixinFacade.addMixins, adapted: requiredMods, behaviorVersion, duplicate configs;
                                    decorates each config with FabricUtil.KEY_MOD_ID / KEY_COMPATIBILITY
@@ -153,36 +172,70 @@ testmods/lifecycle/  genuine NeoForge 26.2 mod `lifecycle` (built like hello). 1
                      config loading (a minimal IConfigSpec writes config/lifecycle-common.toml), the game bus via addListener
                      and @EventBusSubscriber (bindings provider), threads, and on the client that client setup sees the
                      window, options, resources and renderers. Logs "[lifecycle] all N checks passed" at load complete.
-testmods/fabricprobe/ a plain Fabric mod whose main entrypoint sets the system property
-                     versionunbound.testprobe.fabricInitialized; `lifecycle` reads it.
+testmods/registries/ genuine NeoForge 26.2 mod `registries`. 45 registration checks (summary at load complete) and, on servers,
+                     4 world checks (a loadLevel mixin). DeferredRegister/DeferredHolder/DeferredBlock/DeferredItem, data
+                     components used by items, entities, POI types, RegisterEvent order and active container, NewRegistryEvent,
+                     ModifyRegistriesEvent callbacks, a defaulted synced custom registry (add/bake callbacks, getKeyOrNull,
+                     containsValue, ids, aliases), id limits, sync flags, NeoForge's own registries and holder sets, data map
+                     types, datapack registries (synced, and with RegistryBuilder options), and what fabricprobe saw.
+                     Logs "[registries] all N registration checks passed" and "[registries] all N world checks passed".
+                     Its bake callback logs each bake with the ids, which shows client-side remaps after joining a server.
+testmods/neoforge-compile.classtweaker  generated (root task generateTestmodClassTweaker) from META-INF/injected-interfaces.json
+                     in NeoForge's jar. The registries testmod sets it as Loom's accessWidenerPath, so javac sees NeoForge's
+                     extension interfaces on vanilla classes and emits the same calls a NeoForge-built mod has (e.g.
+                     invokeinterface Registry.addAlias). Compile-time only; validateAccessWidener is off because NeoForge's
+                     json names two classes 26.2 doesn't have. Regenerate after changing neoforge_version.
+testmods/fabricprobe/ a plain Fabric mod (with Fabric API). Its main entrypoint sets system properties for the NeoForge testmods:
+                     versionunbound.testprobe.fabricInitialized (`lifecycle`); and, for `registries`, that it could register
+                     an item and a POI type (through Fabric's PoiHelper) after NeoForge's registration, saw NeoForge's item,
+                     and that the NeoForge custom registry has Fabric's SYNCED and MODDED attributes.
 ```
 
 The built `loader-0.1.0.jar` nests `neoforge-api-0.1.0.jar` under `META-INF/jars/`, and that nests bus, typetools, mergetool, NightConfig toml/core and maven-artifact.
 
 **How mods load (since step 2).** The hooks sit where NeoForge's patches put them, except that construction and registration move ahead of Fabric's mod initialization (the decision in §1):
 ```
-preLaunch (loader)          FMLLoader.create → discovery and sorting → addToClassPath → mixin configs
+preLaunch (loader)          FMLLoader.create → discovery and sorting → addToClassPath → mixin configs → start the mod scan
 server Main / client Main,  ServerModLoader.begin(false) / ClientModLoader.begin() = CommonModLoader.begin:
-  after Bootstrap.validate()  construct mods (parallel) → "Registry initialization" (placeholder until step 3)
+  after Bootstrap.validate()  construct mods (parallel; `neoforge` too: NeoForgeMod) → "Registry initialization":
+                                NewRegistryEvent + DataPackRegistryEvent.NewRegistry → ModifyRegistriesEvent → RegisterEvent
+                                per registry (attributes, data components, particles, vanilla's order, then the rest by
+                                namespace); registries stay open (GameData.freezeData is a no-op here)
                               → "Config loading" (CLIENT on the client, then COMMON) → NeoForge.EVENT_BUS.start()
 Fabric                      every Fabric mod's onInitialize (+Client/Server); then Fabric API freezes the registries
+                            (bake callbacks run; vanilla validation skips the NewRegistryEvent registries)
 server: before `new DedicatedServerSettings` (NeoForge's spot) → ServerModLoader.load()
 client: Minecraft.<init>, after registerPanoramaTextures (NeoForge's spot) → ClientModLoader.finish()
-                            = CommonModLoader.load: Common setup → Sided setup → "Registration events" (placeholder)
-                              → Enqueue IMC → Process IMC → FMLLoadCompleteEvent → "Network registry lock" (placeholder)
+                            = CommonModLoader.load: Common setup → Sided setup → "Registration events" (data map types;
+                              the rest are placeholders) → Enqueue IMC → Process IMC → FMLLoadCompleteEvent
+                              → "Network registry lock" (placeholder)
 ```
 `--initSettings` on the server skips mod loading, as in NeoForge. A `ModLoadingException` on the server propagates out of the hook to vanilla's "Failed to start the minecraft server", and the process exits. On the client, vanilla writes a crash report (description "Bootstrap" for errors in `begin`, "Initializing game" for errors in `finish`) and exits with -1. Both paths were checked with the `brokendeps` jar (client: `begin` only).
 
 **Where Layer A deviates from upstream.** Everything else under `neoforge-api/src/{main,client}/java/net/neoforged` is byte-identical to `src/mod_Src/main/FML-11.0.16` or to the NeoForge 26.2 clone, which keeps future diffs cheap. Each deviation has a `VersionUnbound:` comment.
 
-NeoForge (`NeoForge`, `NeoForgeBindings` and the services file are verbatim):
-- `internal/CommonModLoader`: the registry initialization body (step 3) and the network registry lock (step 7) are commented-out placeholders.
-- `internal/RegistrationEvents.init()`: every call is commented out until its feature lands (steps 3 and 9).
+NeoForge (`NeoForge`, `NeoForgeBindings`, the services file and the two extension interfaces are verbatim):
+- `internal/CommonModLoader`: only the network registry lock (step 7) is still a placeholder.
+- `internal/RegistrationEvents.init()`: only `RegistryManager.initDataMaps()` runs; the other calls are commented out until their features land (steps 4, 5 and 9).
+- `common/NeoForgeMod`: a partial port that grows with each step. Today: `MOD_ID`, the logger, the crash report callables, the holder set types (`HOLDER_SET_TYPES` and `ANY/AND/OR/NOT_HOLDER_SET`) and `NeoForgeRegistriesSetup.setup`. Its version comes from FML's `VersionInfo` (no `NeoForgeVersion`). The class comment lists what's missing.
+- Registries (step 3). NeoForge's `MappedRegistry` extends `BaseMappedRegistry`; a mixin can't change a superclass, so `BaseMappedRegistry` isn't ported. `MappedRegistryMixin` adds its members, and code that cast to it casts to `MappedRegistryExtension`.
+  - `RegistryBuilder.create`, `NeoForgeRegistriesSetup.modifyRegistries`: `setMaxId`/`setSync` through `MappedRegistryExtension`. `setSync(true)` sets Fabric API's `SYNCED` registry attribute, and `doesSync()` reads it.
+  - `NewRegistryEvent.fill`: doesn't unfreeze or freeze the root registry. It's still open (Fabric API freezes after Fabric's mod init), and Fabric mods add registries in `onInitialize`.
+  - `GameData`: `unfreezeData`/`freezeData` only log (see "How mods load"). `getBlockItemMap`, `getBlockStateIDMap` and `getBlockStatePointOfInterestTypeMap` return vanilla's `Item.BY_BLOCK`, `Block.BLOCK_STATE_REGISTRY` and `PoiTypes.TYPE_BY_STATE`: NeoForge's patches make those vanilla fields GameData's maps, and Fabric API keeps vanilla's up to date. The flower pot tables, `vanillaSnapshot` and the rollback to vanilla aren't ported. After `RegisterEvent`, the calls into entity attributes, spawn placements, `BlockEntityTypeAddBlocksEvent`, creative tab sorting, game rule categories and the tooltip handler are commented out (steps 4 and 5). The registration order reads `BuiltInRegistries.LOADERS` through an accessor.
+  - `RegistryManager`: no snapshots or network parts (`takeSnapshot`, `applySnapshot`, `revertTo*`, `generateRegistryPackets`, the data map negotiation). Fabric API's registry sync does that job. Added `getNewRegistryKeys()` (the registries `NewRegistryEvent` added), for `BuiltInRegistriesMixin`.
+  - `NeoForgeRegistryCallbacks`: only `PoiTypeCallbacks` (filling vanilla's map). Fabric API already does what the block, item and attribute callbacks do (block state ids, block items, shape caches, the debug world's states); attribute validation comes with entity attributes.
+  - `NeoForgeRegistries`/`NeoForgeRegistriesSetup`: only `ENTITY_DATA_SERIALIZERS` and `HOLDER_SET_TYPES`. The other registries (and `Keys`) are commented out until their entry types are ported: loot modifiers, biome/structure modifiers (+ the datapack `BIOME_MODIFIERS`/`STRUCTURE_MODIFIERS` keys), fluid types, ingredient and fluid ingredient types, conditions, attachments.
+  - `DataPackRegistryEvent`/`DataPackRegistriesHooks`: registration goes to Fabric API's `DynamicRegistries.register`/`registerSynced`, which do what NeoForge's patches to `RegistryDataLoader` and `RegistrySynchronization` do. The `RegistryBuilder` consumer of the four-argument `dataPackRegistry` can't live in vanilla's `RegistryData` record, so it's kept by registry key and `RegistryLoadTaskMixin` applies it. `getSyncedRegistry` searches vanilla's `SYNCHRONIZED_REGISTRIES`; `grabNetworkableRegistries` isn't ported.
+  - `DeferredRegister.addEntries`: adds aliases after the entries, since Fabric's `addAlias` warns about targets that aren't registered yet.
+  - `datamaps/DataMapType`: its javadoc names `neoforge:value` instead of linking `ConditionalOps` (not ported). Only the data map types and their event are ported, not the loader.
+  - `holdersets/AnyHolderSet`, `NotHolderSet`: call `RegistryOpsPatch.retrieveRegistryLookup` (a static method NeoForge adds to `RegistryOps`; see §5 on static methods).
+- What the mixins and class tweaker reproduce from NeoForge's patches: `MappedRegistry` (callbacks, `maxId`, data maps, `getId(key/name)`, `containsValue`, `resolve` through Fabric's aliases, `getKeyOrNull` without the default), `Holder` (un-sealed; `Reference` gets `getData`, the non-allocating `getKey`, key-based `equals`/`hashCode` and `unwrapLookup`), `HolderSet.Named` (invalidation listeners), `Registry.safeCastToReference` (unwraps `getDelegate()`), `RegistryLoadTask` (the builder consumer), `Identifier.compareNamespaced`, the data map getters on `HolderLookup.RegistryLookup`. Not reproduced: the explicit-id `MappedRegistry.register(int, …)`, `unfreeze`, `clear` and `registerIdMapping` (snapshot application only). NeoForge's patches drop two checks in `freeze` and keep intrusive holders around for refreezing; neither applies here, since registries freeze once.
+- Two of NeoForge's `MappedRegistry` changes are Fabric API's own already and are left to it: holders get their value as soon as they're registered, and aliases (Fabric's `addAlias` has NeoForge's signature).
 - `server/loading/ServerModLoader`: `load(boolean)` is split into `begin(boolean)` and `load()` for the two hook points. `LanguageHook` and the crash report dump (`CrashReportExtender`) aren't ported.
 - `client/loading/ClientModLoader`: only `begin()` and `finish()`. Missing: the log4j shutdown hook (Fabric keeps log4j's own), the early loading screen, `LanguageHook`, `setupModResourcePacks` (step 8), the client network registry lock (step 7), update checks, the loading-warnings screen and FML's fatal error window.
 
 FML 11.0.16:
-- `fml/loading/FMLLoader` is rewritten. It keeps the public API: `getCurrent`/`getCurrentOrNull`, `getDist`, `isProduction`, `getGameDir`, `getLoadingModList`, `getVersionInfo`, `getModFileByClass`, `getCurrentClassLoader`, static `getLanguageLoadingProvider`, `getBindings` (ServiceLoader on Knot), `getGameLayer` (returns the boot layer), and the `backgroundScanHandler` field. Its internal entry points are `create(...)` and `discoverMods(minecraftPath, neoForgePath, jars)`. `discoverMods` turns each jar into a `ModFile` (failures become `fml.modloadingissue.brokenfile` issues). It adds in-memory `minecraft` (26.2) and `neoforge` (26.2.0.93) system mods, which have empty contents and use the `minecraft` language loader (no event bus). Then it runs `ModSorter.sort` and `identifyLanguage`, and starts `BackgroundScanHandler`. Not ported: ProgramArgs, early window, class transformers, `close()`.
+- `fml/loading/FMLLoader` is rewritten. It keeps the public API: `getCurrent`/`getCurrentOrNull`, `getDist`, `isProduction`, `getGameDir`, `getLoadingModList`, `getVersionInfo`, `getModFileByClass`, `getCurrentClassLoader`, static `getLanguageLoadingProvider`, `getBindings` (ServiceLoader on Knot), `getGameLayer` (returns the boot layer), and the `backgroundScanHandler` field. Its internal entry points are `create(...)`, `discoverMods(minecraftPath, neoForgePaths, jars)` and `startModScan()`. `discoverMods` turns each jar into a `ModFile` (failures become `fml.modloadingissue.brokenfile` issues). It adds the in-memory system mods: `minecraft` (26.2: empty contents, the `minecraft` language loader, no event bus) and, since step 3, `neoforge` (26.2.0.93: `javafml`, its contents are Layer A's own jar or dev folders, so the scan finds `@Mod("neoforge")` on `NeoForgeMod` and it gets a mod bus, as in NeoForge). Then it runs `ModSorter.sort` and `identifyLanguage`. `startModScan` starts `BackgroundScanHandler`; the loader calls it last in `preLaunch`. Not ported: ProgramArgs, early window, class transformers, `close()`.
 - `ModFile`: no `JarModuleInfo`/`ModuleDescriptor`. `getPackages()` replaces `getModuleDescriptor().packages()`; `LoadingModList`'s package index (one-line change there) is its only user. A file without mods takes its id from the file name.
 - `IModFile`: the `create(...)` overloads that take a `JarModuleInfo` are dropped. `IModFileCandidateLocator.forFolder` is dropped (no locator plugins).
 - `ModFileParser.MODS_TOML` replaces `JarModsDotTomlModFileReader.MODS_TOML` (the reader pipeline isn't ported).
@@ -218,11 +271,25 @@ Negative check (done by hand, not a testmod): a jar that requires a missing mod 
 ```
 Client (Xvfb): the same order, with `[fabricprobe]` on the Render thread inside `Minecraft.<init>`. `[lifecycle] all 12 checks passed` comes before "Reloading ResourceManager". The client then builds all its texture atlases and starts the sound engine, with no errors, until it's stopped. Negative check, repeated with the new hooks: the `brokendeps` jar now fails from `ServerModLoader.begin` inside `Main.main` (stack: `Main.handler$…$versionunbound$beginModLoading`). Vanilla logs "Failed to start the minecraft server" with the same FML message, and the process exits. On the client the same jar produces a "Bootstrap" crash report in `loader/run/crash-reports/`.
 
-### Known gaps (updated after step 2)
+**Verified step 3 output.** Dedicated server, with `registries`, `lifecycle`, `hello`, `metadata` and `fabricprobe`:
+```
+[modloading-worker-0] (NeoForgeMod) NeoForge mod loading, version 26.2.0.93, for MC 26.2
+[modloading-sync-worker] (Checks) [registries] PASS DeferredItem bound by its registry's RegisterEvent
+[main] (FabricProbe) [fabricprobe] Fabric is initializing its mods
+[main] (RegistriesMod) [registries] shapes registry baked, 1 time(s); ids [circle=0, square=1]
+[modloading-worker-0] (MetadataMod) [metadata] all 47 checks passed
+[modloading-worker-0] (LifecycleMod) [lifecycle] all 11 checks passed
+[modloading-worker-0] (Checks) [registries] all 45 registration checks passed
+[Server thread] (Checks) [registries] all 4 world checks passed
+(Minecraft) Done (0.278s)!
+```
+The bake comes from Fabric API's freeze, between Fabric's mod init and common setup. Client (Xvfb): `metadata` 47, `lifecycle` 12 and `registries` 45 pass. The only new warnings are the missing model and sound for `registries:probe_block`/`probe_sound`: the testmod ships no assets, and NeoForge mods' resources aren't mounted yet (Known gap 7). **Registry sync, end to end** (client joining the dedicated server, §3): the client connects, and its bake callback runs again during the join (`baked, 2 time(s); ids [circle=0, square=1]`). That's Fabric API's registry sync remapping the NeoForge custom registry, with `MappedRegistryMixin` running NeoForge's clear and bake callbacks on the remap. The server logs the player joining, and nothing disconnects.
+
+### Known gaps (updated after step 3)
 1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). Since step 2, COMMON and CLIENT configs load at NeoForge's point in `begin` (the `lifecycle` testmod checks this with its own minimal `IConfigSpec`). Still missing: NeoForge's `ModConfigSpec`, and SERVER configs per world (step 6).
 2. ~~Errors wrapped in `RuntimeException`~~ **Fixed:** `ModLoadingException`/`ModLoadingIssue` and FML's translations, all verbatim.
 3. ~~`DeferredWorkQueue` without active container~~ **Fixed** (verbatim).
-4. ~~Lifecycle timing~~ **Fixed in step 2:** NeoForge's full sequence at NeoForge's hook points (see "How mods load" above). Still placeholders: registry initialization (`RegisterEvent`, step 3), "Registration events" (steps 3 and 9) and the network registry locks (step 7).
+4. ~~Lifecycle timing~~ **Fixed in step 2:** NeoForge's full sequence at NeoForge's hook points (see "How mods load" above). Registry initialization is real since step 3. Still placeholders: most of "Registration events" (steps 4, 5 and 9) and the network registry locks (step 7).
 5. **Discovery.** FML's `ModSorter` now does dependency/version resolution and ordering, including `config/fml.toml` `dependencyOverrides`. `[[mixins]]` are handled per file, with `requiredMods`/`behaviorVersion`. Still missing:
    - JarJar.
    - The refuse list.
@@ -237,6 +304,16 @@ Client (Xvfb): the same order, with `[fabricprobe]` on the Render thread inside 
 12. **Only two launch paths are hooked:** the dedicated server's `Main` and the client's `Main`/`Minecraft`. NeoForge also loads mods from the GameTest server (`GameTestMainUtil`, `ServerModLoader.load(true)`) and from datagen. Neither is needed to run mods.
 13. **For Phase 5: `ClientBootstrap.bootstrap()`.** Vanilla calls it in `client/main/Main` before `Bootstrap.validate()`, so before mods are constructed. NeoForge moves it into `Minecraft.<init>`, after `setupModResourcePacks`, so that the item-model registration events it fires reach mods. Do the same when those events are ported.
 14. **No server-side translations (`LanguageHook`).** NeoForge loads its own and mods' `en_us` into the server's language table, so server-side `Component.translatable` text and translated loading errors work without a client.
+15. **Registries, still missing after step 3:**
+   - Six of NeoForge's own registries (and two datapack keys) wait for their entry types; see the `NeoForgeRegistries` deviation in §4. A mod using `NeoForgeRegistries.Keys.ATTACHMENT_TYPES` and the like gets `NoSuchFieldError` until then.
+   - `NeoForgeMod` holds only the holder set types; its other fields (attributes such as `SWIM_SPEED`, milk, vanilla fluid types, ingredient types, …) come with their features. The corpus uses several of them (§7).
+   - Data maps: types, `RegisterDataMapTypesEvent` and the getters work, but nothing loads data map files (`DataMapLoader` needs conditions and reload listeners, step 8), nothing syncs them (step 7), and NeoForge's built-in data maps (`NeoForgeDataMaps`: compostables, furnace fuels, waxables, …) aren't ported.
+   - Holder sets: the four custom types are registered and work as objects, but codecs don't know them yet (NeoForge's `HolderSetCodec` patch).
+   - `ClearCallback`s run only on Fabric's remaps (with `full = false`); NeoForge also runs them, with `full = true`, when applying snapshots, which don't exist here.
+   - Aliases are Fabric API's. Unlike NeoForge, registering a name that is already an alias throws, and `resolve` of an alias whose target isn't registered returns the alias itself.
+   - Fabric API initializes a block's shape cache as soon as the block is registered. NeoForge waits for the registry bake, because a mod's block can depend on entries registered after it. Watch for this if a mod's block misbehaves.
+   - Static methods NeoForge adds to vanilla classes (like `RegistryOps.retrieveRegistryLookup`, `BuiltInRegistries.getVanillaRegistrationOrder`) can't be added by a mixin (Mixin rejects public static methods). Our own code calls a stand-in, but mods calling them get `NoSuchMethodError`. Step 5 needs a way to add them, e.g. a mixin config plugin that adds forwarding methods in `postApply`.
+16. **Testmods see NeoForge's extension interfaces, but not its access transformers or the methods its patches add directly** (e.g. `Holder.Reference.getData`, which they reach through the `Holder` interface instead). The compile class tweaker is generated from `injected-interfaces.json` only; adding NeoForge's AT files to it is part of step 5.
 
 ---
 
@@ -273,6 +350,20 @@ Client (Xvfb): the same order, with `[fabricprobe]` on the Render thread inside 
 - Mixin 0.17.4 accepts `compatibilityLevel` up to `JAVA_25`. MixinExtras (`@Local`, …) comes with Fabric Loader 0.19.5.
 - Loom 1.18's `splitEnvironmentSourceSets()` works with the unobfuscated plugin, and another project's `loom.mods` can reference it with `sourceSet('client', ':neoforge-api')`.
 - FML's mod order changes as mod ids are added (it comes from HashMap order, see above). With `lifecycle` installed it's `[lifecycle, minecraft, hello, metadata, neoforge]`.
+- **Learned in step 3 (registries):**
+  - **`Holder` is sealed in vanilla 26.2** (permits `Direct` and `Reference`); NeoForge's patch un-seals it for `DeferredHolder`. A class tweaker's `extendable class` drops `PermittedSubclasses` (class-tweaker's `AccessWidenerClassVisitor.visitPermittedSubclass`).
+  - **Fabric Loader 0.19.5 applies mods' class tweakers at run time**, including `inject-interface` and `extend-enum` (its `ClassTweakerImpl.createClassVisitor` chains the access widener, interface injection and enum extension visitors). Loom applies the same file at compile time. That makes the class tweaker the tool for NeoForge's injected interfaces and ATs, and for FML's `enumExtensions` later. Generic syntax: `inject-interface<TAB>net/minecraft/core/Registry<TAB>net/neoforged/.../IRegistryExtension<TT;>`.
+  - A class tweaker can't add methods. **Instance methods** NeoForge's patches add to vanilla classes go in an injected interface as default methods: `invokevirtual` and `invokeinterface` from mod code resolve to a superinterface's default method. **Mixin rejects public static methods** (`MixinApplicatorStandard.checkMethodVisibility`: "contains non-private static method"), so static additions need another route.
+  - **When two injected interfaces declare the same method** (Fabric API's `FabricRegistry.addAlias` is a default, NeoForge's `IRegistryExtension.addAlias` is abstract), `invokeinterface Registry.addAlias` resolves to the default one and dispatches to the class's own implementation. A class compiled against both must declare the method itself (javac's "inherits abstract and default"), so our mixins don't `implements Registry`; they add the methods without `@Override`.
+  - **Fabric API's `MappedRegistryMixin` already binds a holder's value at registration** (NeoForge's patch does the same) and **implements aliases** with NeoForge's `addAlias` signature. It runs `RegistryEntryAddedCallback`s, and its trackers (block states, block items, shape caches via `BlocksMixin`, the debug world's states) are registered during `Bootstrap.bootStrap`, so they also see entries registered in `begin`.
+  - **Fabric registry sync** syncs a registry only if it has both `RegistryAttribute.SYNCED` and `MODDED`. Attributes are kept per `ResourceKey` (`RegistryAttributeHolder.get(key)`), so they can be set before the registry exists. `MODDED` is set automatically when an entry is registered after bootstrap. On the client, Fabric remaps ids in place and fires `RegistryIdRemapCallback` (on joining, and on leaving to restore local ids).
+  - **Fabric's `DynamicRegistries.register`/`registerSynced`** are plain static calls without an initializer, so they work in `begin`.
+  - **Fabric API calls `BuiltInRegistries.bootStrap()` a second time** when it freezes, which runs vanilla's `validate`: it logs an error for an empty registry and throws for a defaulted one without its default. NeoForge's modded registries never go through that on NeoForge.
+  - **Mixin's `MixinProcessor.selectConfigs` removes configs from `Mixins.getConfigs()`** as it selects them, on whatever thread is loading a class. Every class Knot loads goes through it, including FML's scanner classes on the background scan threads. So mods' mixin configs must be added and decorated before any other thread can load classes (hence `startModScan` last), or they may be selected undecorated or throw `ConcurrentModificationException`.
+  - **Interface mixins can hold injectors** with private handler methods (Fabric API's `ListBackedContainerMixin` does too); used for `Registry.safeCastToReference`.
+  - **Item components are bound when datapacks load** (`ReloadableServerResources`; on the client in `RegistryDataCollector`). Before that, `new ItemStack(item)` throws "Components not bound yet", on NeoForge too, so stacks can't be made in setup events.
+  - NeoForge's `injected-interfaces.json` (also in its universal jar) names two classes 26.2 doesn't have: `DeadBushBlock` (now `DryVegetationBlock`) and `IntrinsicHolderTagsProvider$IntrinsicTagAppender`.
+  - Fabric's `PoiHelper` registers through vanilla's `PoiTypes.register`, which maps the block states itself after `Registry.register`. NeoForge maps them in a registry callback, so the two together map them twice (`PoiTypesMixin` skips states already mapped to the same type).
 
 ---
 
@@ -358,10 +449,7 @@ Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `te
 
 1. ✅ **FML metadata and context** (done 2026-10-28; see §4 and Known gaps). Original task: port `neoforgespi` `IModInfo`/`IModFileInfo`/`IModFile` (only what mods use), `ModList` (`get()`, `isLoaded`, `getModContainerById`, `getModFileById`, `getMods`), `ModLoadingContext`, `FMLEnvironment`/`FMLLoader` (`getDist`, `isProduction`, `getCurrent()` as in 11.x), `FMLPaths` (`CONFIGDIR`, `GAMEDIR`, `MODSDIR`), `ModLoadingException`/`ModLoadingIssue`, and `InterModComms` with the IMC events. Restore the real `ModContainer` signatures (Shortcut 1). Make `NeoModDiscovery` read the full TOML.
 2. ✅ **Lifecycle ordering** (done 2026-10-28; see "How mods load" in §4). It went in through mixins at NeoForge's call sites rather than Fabric entrypoints (the decision in §1), so `loader` lost its `main` entrypoint. Ported NeoForge's `CommonModLoader`/`ServerModLoader`/`ClientModLoader`, plus `NeoForge.EVENT_BUS` and the bindings provider (Known gap 8). Neoforge-api got a client source set. Testmods `lifecycle` and `fabricprobe`. The client runs under Xvfb.
-3. **Registries.** Port `DeferredRegister`/`DeferredHolder`/`DeferredBlock`/`DeferredItem`, `RegisterEvent`, `NewRegistryEvent`/`RegistryBuilder`, and `NeoForgeRegistries` (custom registries such as attachment types, fluid types, …).
-   - `RegisterEvent` goes in the "Registry initialization" placeholder in `CommonModLoader.begin`. Vanilla registries are open there, because Fabric API delays vanilla's freeze until after Fabric's mod init (§5) and `begin` runs before that.
-   - **`GameData.freezeData()` must not freeze vanilla registries.** NeoForge freezes at the end of `begin`, but on Fabric that would stop every Fabric mod from registering in `onInitialize`. Fabric API's own freeze, after Fabric's mod init, takes its place. `GameData.unfreezeData()` will find vanilla registries already open.
-   - Custom registries must sync through Fabric registry sync.
+3. ✅ **Registries** (done 2026-10-28; see §4 "Where Layer A deviates", Known gap 15 and the facts in §5). Ported the registries package (deferred registers and holders, the registry events, `RegistryBuilder`, callbacks, data map types, holder sets, datapack registries) with NeoForge's `MappedRegistry`/`Holder`/`HolderSet`/`Registry` patches as mixins plus a class tweaker. Registries stay open until Fabric API freezes them, sync goes through Fabric's registry sync (checked with a client joining the server), and datapack registries go through Fabric's `DynamicRegistries`. The `neoforge` system mod became a real `javafml` mod (`NeoForgeMod`). New testmod `registries`; `fabricprobe` checks from Fabric's side; testmods compile with NeoForge's extension interfaces (generated class tweaker).
 4. **Game bus and common events.** `NeoForge.EVENT_BUS` exists since step 2 and starts at the end of `begin`. Implement in this order:
    - Server lifecycle events: `ServerStarting`, `ServerStarted`, `ServerStopping`, `RegisterCommandsEvent`.
    - Tick events, which map onto Fabric's lifecycle callbacks.
@@ -370,9 +458,10 @@ Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `te
    - Living and entity events, through our own mixins where Fabric has no event.
 
    For each, read the NeoForge patch that fires it (`NeoForge-26.2/patches/...`) and write the equivalent mixin, unless Fabric API already has the hook.
-5. **Extension interfaces and ATs.**
-   - Convert `META-INF/injected-interfaces.json` into Loom interface injection (`custom.loom:injected_interfaces` in `fabric.mod.json`). Port the `I*Extension` interfaces; most methods are defaults.
-   - Convert NeoForge's AT files into a class-tweaker/access widener for `neoforge-api` (Connector uses `net.fabricmc:class-tweaker`).
+5. **Extension interfaces and ATs.** The mechanism exists since step 3: `neoforge-api`'s class tweaker (applied by Loom and, at run time, by Fabric Loader) and the `patches/` package.
+   - Add the rest of NeoForge's `META-INF/injected-interfaces.json` to the class tweaker as `inject-interface` lines, porting each `I*Extension` interface (most methods are defaults; abstract ones need a mixin implementing them, as `MappedRegistryMixin` does for `IRegistryExtension`). Skip the two stale targets (§5).
+   - Convert NeoForge's AT files (`accesstransformer.cfg`, `accesstransformergenerated.cfg`) into class tweaker lines, for `neoforge-api` and for the testmods' compile class tweaker (Known gap 16).
+   - Methods NeoForge's patches add straight to vanilla classes: instance methods as injected interfaces (`patches/`), static ones need a way to be added (Known gap 15). That includes `BuiltInRegistries.getVanillaRegistrationOrder` and `RegistryOps.retrieveRegistryLookup`.
    - Mod-provided ATs (`[[accessTransformers]]` in the TOML) need runtime application. Decide between that and transforming the jar.
 6. **Configs.** FML's side (`ModConfig`, `ConfigTracker`, `ModConfigEvent`, `ModContainer.registerConfig`) was ported verbatim in step 1. Remaining: NeoForge's `ModConfigSpec`, and calling `ConfigTracker.loadConfigs` at the right times (see the CommonModLoader sequence in §5). Server configs load per world; check NeoForge's `ConfigTracker` for how.
 7. **Networking.** Port `RegisterPayloadHandlersEvent`/`PayloadRegistrar`/`IPayloadContext`/`PacketDistributor` on top of Fabric `fabric-networking-api-v1` payload types (`PayloadTypeRegistry` + `ServerPlayNetworking`/`ClientPlayNetworking`).
@@ -401,7 +490,8 @@ Hook the transformer into `VersionUnboundPreLaunch` before `addToClassPath`: det
 
 ## 10. Risks and open questions
 
-- **Registry freeze timing on Fabric** vs NeoForge's `RegisterEvent` (step 3). Step 2 mostly settled this: `begin` runs while vanilla registries are open, and `lifecycle` checks that they're frozen by common setup. What's left is the `GameData.freezeData()` adaptation described in §8 step 3.
+- ~~Registry freeze timing on Fabric~~ Settled in step 3: registration runs in `begin` while the registries are open, Fabric API freezes them after Fabric's mod init, and bake callbacks run then.
+- **Two implementations of one patch.** Where Fabric API already does what a NeoForge patch does (holder binding, aliases, registry sync, dynamic registries, vanilla's block/item maps), Layer A uses Fabric's, and the behavior differs slightly at the edges (Known gap 15). Prefer that over a second implementation in the same vanilla methods, but check each edge case a mod hits.
 - **Mixin conflicts.** Our hook mixins and the mods' own mixins hit the same vanilla methods; NeoForge mods assume NeoForge's patched code shape. Expect per-mod adjustments.
 - **Client rendering (Phase 5)** is the largest unknown. Create's Flywheel is a render engine, so Create's client side may need a fallback rather than a translation.
 - **Kotlin for Forge** (Cobblemon) is an FML language provider (`neoforgespi.language`); it needs a language-loader shim.

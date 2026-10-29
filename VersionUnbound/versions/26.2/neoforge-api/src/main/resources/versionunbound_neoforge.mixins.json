@@ -3,7 +3,19 @@
   "minVersion": "0.8",
   "package": "net.salutaryfish.versionunbound.neoforge.mixin",
   "compatibilityLevel": "JAVA_25",
-  "server": ["server.MainMixin"],
+  "mixins": [
+    "registries.BuiltInRegistriesAccessor",
+    "registries.BuiltInRegistriesMixin",
+    "registries.HolderReferenceMixin",
+    "registries.HolderSetNamedMixin",
+    "registries.MappedRegistryMixin",
+    "registries.PoiTypesMixin",
+    "registries.RegistryLoadTaskMixin",
+    "registries.RegistryMixin"
+  ],
+  "server": [
+    "server.MainMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

@@ -6,6 +6,7 @@
   "description": "The NeoForge 26.2 API implemented on Fabric, for mods loaded by VersionUnbound.",
   "license": "LGPL-2.1-only",
   "environment": "*",
+  "accessWidener": "versionunbound_neoforge.classtweaker",
   "mixins": [
     "versionunbound_neoforge.mixins.json",
     {

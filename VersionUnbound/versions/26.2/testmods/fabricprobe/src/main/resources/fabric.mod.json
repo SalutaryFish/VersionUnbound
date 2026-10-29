@@ -3,13 +3,14 @@
   "id": "versionunbound_fabricprobe",
   "version": "${version}",
   "name": "VersionUnbound Fabric Probe",
-  "description": "Test mod: records when Fabric initializes its mods, for the lifecycle testmod to check.",
+  "description": "Test mod: records when Fabric initializes its mods and what it sees in the registries, for NeoForge testmods to check.",
   "license": "LGPL-2.1-only",
   "environment": "*",
   "entrypoints": {
     "main": ["net.salutaryfish.versionunbound.testmod.fabricprobe.FabricProbe"]
   },
   "depends": {
-    "fabricloader": ">=0.19.5"
+    "fabricloader": ">=0.19.5",
+    "fabric-api": "*"
   }
 }

@@ -3,6 +3,8 @@ apply plugin: 'net.fabricmc.fabric-loom'
 // Client-only code lives in src/client, as in NeoForge, so common code can't reference client classes.
 loom {
 	splitEnvironmentSourceSets()
+	// NeoForge's changes to vanilla's class shapes: un-sealing and extension interfaces (see the file).
+	accessWidenerPath = file('src/main/resources/versionunbound_neoforge.classtweaker')
 
 	mods {
 		versionunbound_neoforge {

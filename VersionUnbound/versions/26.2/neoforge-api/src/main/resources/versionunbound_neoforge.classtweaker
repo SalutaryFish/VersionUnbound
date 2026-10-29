@@ -1,0 +1,19 @@
+classTweaker	v1	official
+
+# NeoForge's patch drops `sealed` from Holder so that DeferredHolder can implement it. Making it extendable removes the
+# PermittedSubclasses attribute, at compile time (Loom) and at run time (Fabric Loader).
+extendable	class	net/minecraft/core/Holder
+
+# NeoForge's extension interfaces (its META-INF/injected-interfaces.json), added as each is ported.
+inject-interface	net/minecraft/core/Registry	net/neoforged/neoforge/registries/IRegistryExtension<TT;>
+inject-interface	net/minecraft/core/Holder	net/neoforged/neoforge/common/extensions/IHolderExtension<TT;>
+inject-interface	net/minecraft/core/HolderSet	net/neoforged/neoforge/common/extensions/IHolderSetExtension<TT;>
+# Methods NeoForge's patches add to vanilla classes (see the patches package).
+inject-interface	net/minecraft/resources/Identifier	net/salutaryfish/versionunbound/neoforge/patches/IdentifierExtension
+inject-interface	net/minecraft/core/HolderLookup$RegistryLookup	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension<TT;>
+inject-interface	net/minecraft/core/HolderLookup$RegistryLookup$Delegate	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension$Delegate<TT;>
+
+# NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
+# NeoForge's patch replaces with GameData's).
+accessible	field	net/minecraft/resources/RegistryOps	lookupProvider	Lnet/minecraft/resources/RegistryOps$RegistryInfoLookup;
+accessible	field	net/minecraft/world/entity/ai/village/poi/PoiTypes	TYPE_BY_STATE	Ljava/util/Map;

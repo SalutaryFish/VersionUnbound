@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Runs before Minecraft's classes load. Starts FML ({@link FMLLoader}), lets it read the NeoForge mod jars in
  * mods/, then puts the accepted jars on the game classpath and registers their mixin configs, so the mixins apply
- * when the target classes first load.
+ * when the target classes first load. Last, FML starts scanning the mods for annotations.
  */
 public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
     private static final Logger LOGGER = LoggerFactory.getLogger("VersionUnbound");
@@ -53,7 +53,7 @@ public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to scan " + FMLPaths.MODSDIR.get() + " for NeoForge mods", e);
         }
-        LoadingModList mods = loader.discoverMods(minecraft.getOrigin().getPaths().getFirst(), layerA.getOrigin().getPaths().getFirst(), jars);
+        LoadingModList mods = loader.discoverMods(minecraft.getOrigin().getPaths().getFirst(), layerA.getOrigin().getPaths(), jars);
 
         // If FML rejected the mod set, it keeps only the system mods; the errors are thrown when mod loading starts.
         Set<Path> modJars = new HashSet<>(jars);
@@ -64,5 +64,7 @@ public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
             LOGGER.info("Found NeoForge mod file {} with mods {}", modFile.getFileName(), modFile.getModInfos());
         }
         NeoMixinConfigs.register(mods);
+        // Only now: the scan threads load classes, and with them Mixin would take up configs before they're tagged.
+        loader.startModScan();
     }
 }

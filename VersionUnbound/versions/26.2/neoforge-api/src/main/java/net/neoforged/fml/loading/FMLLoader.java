@@ -7,6 +7,8 @@ package net.neoforged.fml.loading;
 
 import com.electronwill.nightconfig.core.Config;
 import com.mojang.logging.LogUtils;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +41,8 @@ import org.slf4j.Logger;
  * class transformers. On Fabric, Fabric Loader, Knot and Mixin do all of that, so this class keeps only the state
  * that mods and the rest of FML read. VersionUnbound's loader mod creates it in {@code preLaunch} and hands it the
  * NeoForge mod jars it found; {@link #discoverMods} then follows FML's discovery: read each jar, add the
- * {@code minecraft} and {@code neoforge} system mods, sort, check dependencies, pick language loaders and start
- * scanning for annotations.
+ * {@code minecraft} and {@code neoforge} system mods, sort, check dependencies and pick language loaders.
+ * {@link #startModScan} starts scanning for annotations, once the loader mod has registered the mods' mixin configs.
  */
 public final class FMLLoader {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -96,22 +98,28 @@ public final class FMLLoader {
      * they are thrown later by {@link net.neoforged.fml.ModLoader#gatherAndInitializeMods}.
      *
      * @param minecraftPath the Minecraft jar, shown as the location of the {@code minecraft} system mod
-     * @param neoForgePath  the jar or folder of Layer A, shown as the location of the {@code neoforge} system mod
+     * @param neoForgePaths the jar of Layer A, or its folders in a dev run: the contents of the {@code neoforge} system mod
      * @param modJars       NeoForge mod jars, each containing {@code META-INF/neoforge.mods.toml}
      */
     @ApiStatus.Internal
-    public LoadingModList discoverMods(Path minecraftPath, Path neoForgePath, List<Path> modJars) {
+    public LoadingModList discoverMods(Path minecraftPath, List<Path> neoForgePaths, List<Path> modJars) {
         if (loadingModList != null) {
             throw new IllegalStateException("Mods were already discovered");
         }
         var issues = new ArrayList<ModLoadingIssue>();
         var modFiles = new ArrayList<ModFile>();
-        // The system mods. Their contents are empty: FML would scan Minecraft and NeoForge for annotations, but
-        // nothing in them is meant for mods to find, and scanning them would only slow down startup.
-        modFiles.add(systemModFile(minecraftPath, "minecraft", versionInfo.mcVersion(), "Minecraft", "Minecraft",
-                "Mojang Studios, All Rights Reserved"));
-        modFiles.add(systemModFile(neoForgePath, "neoforge", versionInfo.neoForgeVersion(), "NeoForge",
-                "A free, open-source, community-oriented modding API for Minecraft: Java Edition.", "LGPL v2.1"));
+        // The system mods. Minecraft's contents are empty: FML scans the Minecraft jar too, but nothing in it is meant
+        // for mods to find, and scanning it would only slow down startup. NeoForge's are Layer A, which holds NeoForge's
+        // own mod: like NeoForge's jar, it is scanned for its @Mod class and @EventBusSubscriber classes.
+        modFiles.add(systemModFile(JarContents.empty(minecraftPath), "minecraft", "minecraft", versionInfo.mcVersion(),
+                "Minecraft", "Minecraft", "Mojang Studios, All Rights Reserved"));
+        try {
+            modFiles.add(systemModFile(JarContents.ofPaths(neoForgePaths), FMLJavaModLanguageProvider.NAME, "neoforge",
+                    versionInfo.neoForgeVersion(), "NeoForge",
+                    "A free, open-source, community-oriented modding API for Minecraft: Java Edition.", "LGPL v2.1"));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read NeoForge's mod contents from " + neoForgePaths, e);
+        }
 
         for (Path jar : modJars) {
             JarContents contents = null;
@@ -141,18 +149,32 @@ public final class FMLLoader {
             }
         }
         this.loadingModList = list;
-        this.backgroundScanHandler = new BackgroundScanHandler(list.getAllModFiles());
 
         LOGGER.debug(LogMarkers.LOADING, "Discovered NeoForge mods: {}", list.getMods().stream()
                 .map(mod -> mod.getModId() + "@" + mod.getVersion()).collect(Collectors.joining(", ")));
         return list;
     }
 
-    private static ModFile systemModFile(Path path, String modId, String version, String displayName, String description, String license) {
-        return new ModFile(JarContents.empty(path), file -> {
-            // Same shape as FML's MinecraftModInfo: no event bus, loaded by the "minecraft" language loader.
+    /**
+     * Starts scanning the discovered mod files for annotations, in the background, as FML does after discovery.
+     *
+     * <p>Not part of {@link #discoverMods}: the scan threads load FML's scanner classes, and on Fabric every class load
+     * goes through Mixin, which takes up newly added mixin configs as it goes. Mods' configs must be registered, and
+     * tagged with their mod, before that can happen on another thread.
+     */
+    @ApiStatus.Internal
+    public void startModScan() {
+        if (backgroundScanHandler != null) {
+            throw new IllegalStateException("The mod scan was already started");
+        }
+        this.backgroundScanHandler = new BackgroundScanHandler(getLoadingModList().getAllModFiles());
+    }
+
+    private static ModFile systemModFile(JarContents contents, String modLoader, String modId, String version, String displayName, String description, String license) {
+        return new ModFile(contents, file -> {
+            // Built in memory, as FML does for Minecraft's mod info; NeoForge's jar has a neoforge.mods.toml instead.
             var conf = Config.inMemory();
-            conf.set("modLoader", "minecraft");
+            conf.set("modLoader", modLoader);
             conf.set("loaderVersion", "1");
             conf.set("license", license);
             var mod = Config.inMemory();

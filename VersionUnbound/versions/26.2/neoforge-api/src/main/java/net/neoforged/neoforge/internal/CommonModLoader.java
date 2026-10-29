@@ -21,6 +21,8 @@ import net.neoforged.fml.event.lifecycle.InterModProcessEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.registries.GameData;
+import net.neoforged.neoforge.registries.RegistryManager;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
@@ -46,11 +48,10 @@ public abstract class CommonModLoader {
         ModLoader.gatherAndInitializeMods(syncExecutor, ModWorkManager.parallelExecutor(), periodicTask);
 
         ModLoader.runInitTask("Registry initialization", syncExecutor, periodicTask, () -> {
-            // VersionUnbound: RegistryManager and GameData arrive with registries (Phase 2 step 3).
-            // RegistryManager.postNewRegistryEvent();
-            // GameData.unfreezeData();
-            // GameData.postRegisterEvents();
-            // GameData.freezeData();
+            RegistryManager.postNewRegistryEvent();
+            GameData.unfreezeData();
+            GameData.postRegisterEvents();
+            GameData.freezeData();
             registriesLoaded = true;
         });
 

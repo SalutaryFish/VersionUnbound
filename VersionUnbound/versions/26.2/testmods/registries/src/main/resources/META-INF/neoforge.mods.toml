@@ -1,0 +1,23 @@
+modLoader = "javafml"
+# Checked against the version of the built-in javafml loader (FML 11.0.16).
+loaderVersion = "[11,)"
+license = "LGPL-2.1-only"
+
+[[mods]]
+modId = "registries"
+version = "0.1.0"
+displayName = "VersionUnbound Registries"
+description = "Checks NeoForge's registry API: deferred registers and holders, registry events, custom and datapack registries."
+
+[[mixins]]
+config = "registries.mixins.json"
+
+[[dependencies.registries]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.2,)"
+
+[[dependencies.registries]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.2.0,)"
