@@ -8,7 +8,10 @@
   ],
   "mixins": [
     "AbstractHorseInvoker",
-    "LivingEntityInvoker"
+    "EntityAccessor",
+    "LivingEntityInvoker",
+    "ProjectileInvoker",
+    "ShulkerInvoker"
   ],
   "injectors": {
     "defaultRequire": 1

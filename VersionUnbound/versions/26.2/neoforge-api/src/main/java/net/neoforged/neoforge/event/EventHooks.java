@@ -21,13 +21,18 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
+import net.minecraft.world.phys.HitResult;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
+import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
@@ -42,6 +47,7 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import org.jetbrains.annotations.ApiStatus;
 import org.jspecify.annotations.Nullable;
 
 // VersionUnbound: ported a feature at a time, like NeoForgeMod. The methods here are verbatim and in NeoForge's order;
@@ -116,6 +122,10 @@ public class EventHooks {
         return (NeoForge.EVENT_BUS.post(event).isCanceled() ? 0 : event.getAmount());
     }
 
+    public static boolean onProjectileImpact(Projectile projectile, HitResult ray) {
+        return NeoForge.EVENT_BUS.post(new ProjectileImpactEvent(projectile, ray)).isCanceled();
+    }
+
     public static void fireChunkTicketLevelUpdated(ServerLevel level, long chunkPos, int oldTicketLevel, int newTicketLevel, @Nullable ChunkHolder chunkHolder) {
         if (oldTicketLevel != newTicketLevel)
             NeoForge.EVENT_BUS.post(new ChunkTicketLevelUpdatedEvent(level, chunkPos, oldTicketLevel, newTicketLevel, chunkHolder));
@@ -136,6 +146,37 @@ public class EventHooks {
     public static void onCommandRegister(CommandDispatcher<CommandSourceStack> dispatcher, Commands.CommandSelection environment, CommandBuildContext context) {
         RegisterCommandsEvent event = new RegisterCommandsEvent(dispatcher, environment, context);
         NeoForge.EVENT_BUS.post(event);
+    }
+
+    public static EntityTeleportEvent.TeleportCommand onEntityTeleportCommand(Entity entity, ServerLevel targetLevel, double targetX, double targetY, double targetZ) {
+        EntityTeleportEvent.TeleportCommand event = new EntityTeleportEvent.TeleportCommand(entity, targetLevel, targetX, targetY, targetZ);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
+    }
+
+    public static EntityTeleportEvent.SpreadPlayersCommand onEntityTeleportSpreadPlayersCommand(Entity entity, ServerLevel targetLevel, double targetX, double targetY, double targetZ) {
+        EntityTeleportEvent.SpreadPlayersCommand event = new EntityTeleportEvent.SpreadPlayersCommand(entity, targetLevel, targetX, targetY, targetZ);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
+    }
+
+    public static EntityTeleportEvent.EnderEntity onEnderTeleport(LivingEntity entity, double targetX, double targetY, double targetZ) {
+        EntityTeleportEvent.EnderEntity event = new EntityTeleportEvent.EnderEntity(entity, targetX, targetY, targetZ);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
+    }
+
+    @ApiStatus.Internal
+    public static EntityTeleportEvent.EnderPearl onEnderPearlLand(ServerPlayer entity, double targetX, double targetY, double targetZ, ThrownEnderpearl pearlEntity, float attackDamage, HitResult hitResult) {
+        EntityTeleportEvent.EnderPearl event = new EntityTeleportEvent.EnderPearl(entity, targetX, targetY, targetZ, pearlEntity, attackDamage, hitResult);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
+    }
+
+    public static EntityTeleportEvent.ItemConsumption onItemConsumptionTeleport(LivingEntity entity, ItemStack itemStack, double targetX, double targetY, double targetZ) {
+        EntityTeleportEvent.ItemConsumption event = new EntityTeleportEvent.ItemConsumption(entity, itemStack, targetX, targetY, targetZ);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
     }
 
     public static void firePlayerChangedDimensionEvent(Player player, ResourceKey<Level> fromDim, ResourceKey<Level> toDim) {

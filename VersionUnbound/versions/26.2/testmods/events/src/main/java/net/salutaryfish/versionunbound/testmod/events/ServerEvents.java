@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -27,6 +28,7 @@ import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
@@ -39,6 +41,8 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
+import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
@@ -176,6 +180,14 @@ final class ServerEvents {
         bus.addListener(PlayerDestroyItemEvent.class, event -> {
             if (!event.getEntity().level().isClientSide()) session().destroyedItems.destroyItem(event);
         });
+        bus.addListener(ProjectileImpactEvent.class, event -> {
+            if (!event.getProjectile().level().isClientSide()) session().projectiles.impact(event);
+        });
+        // Teleport events fire only on the server.
+        for (Class<? extends EntityTeleportEvent> kind : List.of(EntityTeleportEvent.TeleportCommand.class, EntityTeleportEvent.SpreadPlayersCommand.class,
+                EntityTeleportEvent.EnderEntity.class, EntityTeleportEvent.EnderPearl.class, EntityTeleportEvent.ItemConsumption.class)) {
+            bus.addListener(kind, event -> session().teleports.teleport(event));
+        }
         bus.addListener(ItemExpireEvent.class, event -> session().items.expire(event));
         bus.addListener(ItemEntityPickupEvent.Pre.class, event -> session().items.pickupPre(event));
         bus.addListener(ItemEntityPickupEvent.Post.class, event -> session().items.pickupPost(event));
@@ -276,7 +288,9 @@ final class ServerEvents {
         private final ItemScenario items = new ItemScenario(checks, playerChecks, joins);
         private final ChunkScenario chunks = new ChunkScenario(checks, playerChecks);
         private final DestroyItemScenario destroyedItems = new DestroyItemScenario(playerChecks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems);
+        private final ProjectileScenario projectiles = new ProjectileScenario(checks, playerChecks);
+        private final TeleportScenario teleports = new TeleportScenario(checks, playerChecks);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -304,6 +318,9 @@ final class ServerEvents {
         private ArmorStand rider;
         private double frozenY;
         private final Map<Entity, int[]> entityTicks = Collections.synchronizedMap(new IdentityHashMap<>());
+
+        // The server tick the projectile and teleport scenarios ran at, -1 until then.
+        private int scenariosTick = -1;
 
         private final AtomicInteger playerTicksPre = new AtomicInteger();
         private final AtomicInteger playerTicksPost = new AtomicInteger();
@@ -480,6 +497,16 @@ final class ServerEvents {
             } else {
                 serverTicksPost++;
                 if (serverTicksPre != serverTicksPost) serverTicksAlternate = false;
+                // Once the forced chunk's entities are visible (to projectiles' hit checks), a few ticks after server
+                // started, or more in a new world. Far below the entities spawned at server started, which fall.
+                ServerLevel overworld = server.overworld();
+                if (scenariosTick < 0 && overworld.getEntity(ticking.getUUID()) == ticking) {
+                    scenariosTick = serverTicksPost;
+                    LOGGER.info("[events] the forced chunk's entities are visible at server tick {}", scenariosTick);
+                    int y = overworld.getMaxY() - 48;
+                    projectiles.run(overworld, new Vec3(8.5, y, 4.5));
+                    teleports.run(overworld, new BlockPos(8, y, 8));
+                }
             }
         }
 
@@ -531,6 +558,7 @@ final class ServerEvents {
             checks.check("entity ticks fired, Pre and Post", tickingTicks[0] > 0 && tickingTicks[0] == tickingTicks[1]);
             checks.check("canceling EntityTickEvent.Pre skips the tick", frozenTicks[0] > 0 && frozenTicks[1] == 0 && frozen.getY() == frozenY);
             checks.check("a passenger's ticks fire the entity tick events", rider.isPassenger() && riderTicks[0] > 0 && riderTicks[0] == riderTicks[1]);
+            checks.check("the projectile and teleport scenarios ran", scenariosTick > 0);
 
             // Leave the world as it was.
             living.finish();

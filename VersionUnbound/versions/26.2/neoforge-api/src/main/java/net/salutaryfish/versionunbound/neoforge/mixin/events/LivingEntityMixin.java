@@ -2,15 +2,18 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Cancellable;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalBooleanRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalDoubleRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalFloatRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalIntRef;
+import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Stack;
@@ -23,6 +26,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -31,15 +35,19 @@ import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.EventHooks;
+import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
+import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityRandomTeleport;
+import org.jspecify.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -53,7 +61,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * inventory and tossed items), knockback, equipment changes, item use (start, tick, stop and finish, and
  * {@code PlayerDestroyItemEvent} when releasing uses up a player's item), healing, falling and jumping (the mobs that
  * jump their own way fire it in their own mixins). {@code ServerPlayer.die} fires the death event itself
- * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}).
+ * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}). Also
+ * {@code EntityTeleportEvent} in {@code randomTeleport} (for a consumed item, or an enderman), with NeoForge's overload
+ * that takes the item.
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
@@ -64,7 +74,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * ({@code ArmorHurtEvent} in {@code doHurtEquipment}).
  */
 @Mixin(LivingEntity.class)
-abstract class LivingEntityMixin implements LivingEntityDamageContainers {
+abstract class LivingEntityMixin implements LivingEntityDamageContainers, LivingEntityRandomTeleport {
     // Neo: one container per hurtServer call in progress. Added under NeoForge's name, for mods that read it.
     // (invulnerableTime is Entity's, which a mixin can't shadow from here; it's public.)
     protected Stack<DamageContainer> damageContainers = new Stack<>();
@@ -366,5 +376,57 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers {
             return true;
         }
         return original.call(level, entity);
+    }
+
+    // Set by NeoForge's randomTeleport overload for the vanilla method it calls, which takes it at its head.
+    @Unique
+    private @Nullable ItemStack versionunbound$teleportStack;
+
+    // Neo: Add overload with the consumed item causing the random teleport
+    // VersionUnbound: vanilla's method keeps its body (other mods' mixins target it); this overload hands it the stack.
+    @Override
+    public boolean randomTeleport(double xx, double yy, double zz, boolean showParticles, ItemStack consumedStack) {
+        this.versionunbound$teleportStack = consumedStack;
+        return ((LivingEntity) (Object) this).randomTeleport(xx, yy, zz, showParticles);
+    }
+
+    @Inject(method = "randomTeleport(DDDZ)Z", at = @At("HEAD"))
+    private void versionunbound$takeConsumedStack(double xx, double yy, double zz, boolean showParticles, CallbackInfoReturnable<Boolean> cir,
+            @Share("consumedStack") LocalRef<ItemStack> consumedStack) {
+        consumedStack.set(this.versionunbound$teleportStack == null ? ItemStack.EMPTY : this.versionunbound$teleportStack);
+        this.versionunbound$teleportStack = null;
+    }
+
+    // Neo: Fire event for either item consumption or EnderMan teleport, to get the actual final position being teleported to
+    @WrapOperation(method = "randomTeleport(DDDZ)Z", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;teleportTo(DDD)V", ordinal = 0))
+    private void versionunbound$entityTeleport(LivingEntity self, double xx, double y, double zz, Operation<Void> original,
+            @Share("consumedStack") LocalRef<ItemStack> consumedStack, @Share("teleported") LocalBooleanRef teleported) {
+        EntityTeleportEvent event = null;
+        if (!consumedStack.get().isEmpty()) {
+            event = EventHooks.onItemConsumptionTeleport(self, consumedStack.get(), xx, y, zz);
+        } else if (self instanceof EnderMan) {
+            event = EventHooks.onEnderTeleport(self, xx, y, zz);
+        }
+        if (event != null) {
+            xx = event.getTargetX();
+            y = event.getTargetY();
+            zz = event.getTargetZ();
+        }
+        if (event == null || !event.isCanceled()) {
+            teleported.set(true);
+            original.call(self, xx, y, zz);
+        }
+    }
+
+    // Vanilla checks the destination right after teleporting there; NeoForge skips the check when the event canceled it.
+    @WrapOperation(method = "randomTeleport(DDDZ)Z", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;noCollision(Lnet/minecraft/world/entity/Entity;)Z"))
+    private boolean versionunbound$checkIfTeleported(Level level, Entity entity, Operation<Boolean> original, @Share("teleported") LocalBooleanRef teleported) {
+        return teleported.get() && original.call(level, entity);
+    }
+
+    // Neo: Teleport back to original only if we teleported away and need to revert
+    @WrapWithCondition(method = "randomTeleport(DDDZ)Z", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;teleportTo(DDD)V", ordinal = 1))
+    private boolean versionunbound$revertIfTeleported(LivingEntity self, double xo, double yo, double zo, @Share("teleported") LocalBooleanRef teleported) {
+        return teleported.get();
     }
 }

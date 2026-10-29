@@ -47,7 +47,7 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.LivingEntityInvoker;
  * own code paths for that player, the ones the network handler calls: clicking and breaking blocks, using blocks and
  * items, interacting with and attacking entities, a canceled death and the death drops, picking up and tossing items,
  * items breaking or used up,
- * teleporting within the overworld, to the nether and back, and finally
+ * teleporting within the overworld, to the nether and back, a fishing hook and ender pearls, and finally
  * respawning as if from the End. The listeners below cancel or redirect some of these by position or target.
  */
 final class PlayerScenario {
@@ -59,6 +59,8 @@ final class PlayerScenario {
     private final DamageScenario damage;
     private final ItemScenario items;
     private final DestroyItemScenario destroyedItems;
+    private final ProjectileScenario projectiles;
+    private final TeleportScenario teleports;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
 
@@ -99,13 +101,15 @@ final class PlayerScenario {
     private boolean respawnEndConquered;
 
     PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
-            DestroyItemScenario destroyedItems) {
+            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
         this.damage = damage;
         this.items = items;
         this.destroyedItems = destroyedItems;
+        this.projectiles = projectiles;
+        this.teleports = teleports;
     }
 
     boolean played() {
@@ -325,6 +329,11 @@ final class PlayerScenario {
                         && dimensionChanges.equals(List.of("overworld>the_nether", "the_nether>overworld")));
         checks.check("each dimension change has the player leave one level and join the other",
                 joins.getOrDefault(player, 0) == 3 && leaves.getOrDefault(player, 0) == 2);
+
+        // A fishing hook (ProjectileScenario) and ender pearls (TeleportScenario), after the teleport checks above:
+        // pearls teleport the player too.
+        projectiles.runWithPlayer(player, level, base);
+        teleports.runWithPlayer(player, level, base);
 
         // Respawn as when leaving the End: the old player is replaced by a new one that keeps everything.
         ServerPlayer old = player;
