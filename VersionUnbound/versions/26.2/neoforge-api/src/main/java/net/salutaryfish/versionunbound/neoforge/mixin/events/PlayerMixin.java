@@ -3,6 +3,9 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 import com.google.common.base.Preconditions;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
+import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionHand;
@@ -29,8 +32,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * NeoForge's patch to {@code Player}, for the events it fires: player ticks (wrapping {@code Player.tick()}, so inside
  * the entity tick events), entity interaction and attack (both cancellable, on both sides), and the damage pipeline in
  * the player's own {@code actuallyHurt} (see {@code LivingEntityMixin}), and {@code ItemTossEvent} for items the player
- * drops ({@code CommonHooks.onPlayerTossEvent} drops them through the drop capture). Not yet: {@code PlayerDestroyItemEvent} when an
- * interaction uses up the held item.
+ * drops ({@code CommonHooks.onPlayerTossEvent} drops them through the drop capture), and {@code PlayerDestroyItemEvent}
+ * when an entity interaction uses up the held item or an attack breaks the weapon.
  */
 @Mixin(Player.class)
 abstract class PlayerMixin {
@@ -51,9 +54,43 @@ abstract class PlayerMixin {
         if (cancelResult != null) cir.setReturnValue(cancelResult);
     }
 
+    // NeoForge fires it just before "return interact", after the creative count fix. That fix runs only with infinite
+    // materials, which is when the event doesn't fire, so firing at the check gives the same result and doesn't depend
+    // on the method's return ordinals.
+    @Inject(method = "interactOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;hasInfiniteMaterials()Z", ordinal = 0))
+    private void versionunbound$destroyItemOnInteract(Entity entity, InteractionHand hand, Vec3 location, CallbackInfoReturnable<InteractionResult> cir,
+            @Local(ordinal = 0) ItemStack itemStack, @Local(ordinal = 1) ItemStack itemStackClone) {
+        Player self = (Player) (Object) this;
+        if (!self.getAbilities().instabuild && itemStack.isEmpty()) {
+            EventHooks.onPlayerDestroyItem(self, itemStackClone, hand);
+        }
+    }
+
+    // The item used on a living entity is used up, before it's taken out of the hand.
+    @Inject(method = "interactOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;setItemInHand(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;)V"))
+    private void versionunbound$destroyItemOnInteractLiving(Entity entity, InteractionHand hand, Vec3 location, CallbackInfoReturnable<InteractionResult> cir,
+            @Local(ordinal = 1) ItemStack itemStackClone) {
+        EventHooks.onPlayerDestroyItem((Player) (Object) this, itemStackClone, hand);
+    }
+
     @Inject(method = "attack", at = @At("HEAD"), cancellable = true)
     private void versionunbound$attackEntity(Entity entity, CallbackInfo ci) {
         if (!CommonHooks.onPlayerAttackTarget((Player) (Object) this, entity)) ci.cancel();
+    }
+
+    // NeoForge copies the weapon after resolving the ender dragon part, which doesn't touch the stack.
+    @Inject(method = "itemAttackInteraction", at = @At("HEAD"))
+    private void versionunbound$copyAttackingItem(Entity entity, ItemStack attackingItemStack, DamageSource damageSource, boolean applyToTarget, CallbackInfo ci,
+            @Share("attackingItemCopy") LocalRef<ItemStack> copy) {
+        copy.set(attackingItemStack.copy());
+    }
+
+    // The weapon broke in the attack, before it's taken out of the hand.
+    @Inject(method = "itemAttackInteraction", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;getMainHandItem()Lnet/minecraft/world/item/ItemStack;"))
+    private void versionunbound$destroyItemOnAttack(Entity entity, ItemStack attackingItemStack, DamageSource damageSource, boolean applyToTarget, CallbackInfo ci,
+            @Share("attackingItemCopy") LocalRef<ItemStack> copy) {
+        Player self = (Player) (Object) this;
+        EventHooks.onPlayerDestroyItem(self, copy.get(), attackingItemStack == self.getMainHandItem() ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND);
     }
 
     @WrapOperation(method = "drop(Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/entity/item/ItemEntity;", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;drop(Lnet/minecraft/world/item/ItemStack;ZZ)Lnet/minecraft/world/entity/item/ItemEntity;"))

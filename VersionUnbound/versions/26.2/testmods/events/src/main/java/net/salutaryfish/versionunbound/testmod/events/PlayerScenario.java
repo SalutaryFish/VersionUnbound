@@ -46,6 +46,7 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.LivingEntityInvoker;
  * {@value #DELAY} more ticks, and then drives the server's
  * own code paths for that player, the ones the network handler calls: clicking and breaking blocks, using blocks and
  * items, interacting with and attacking entities, a canceled death and the death drops, picking up and tossing items,
+ * items breaking or used up,
  * teleporting within the overworld, to the nether and back, and finally
  * respawning as if from the End. The listeners below cancel or redirect some of these by position or target.
  */
@@ -57,6 +58,7 @@ final class PlayerScenario {
     private final Map<Entity, Integer> leaves;
     private final DamageScenario damage;
     private final ItemScenario items;
+    private final DestroyItemScenario destroyedItems;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
 
@@ -96,12 +98,14 @@ final class PlayerScenario {
     private Player respawned;
     private boolean respawnEndConquered;
 
-    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items) {
+    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
+            DestroyItemScenario destroyedItems) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
         this.damage = damage;
         this.items = items;
+        this.destroyedItems = destroyedItems;
     }
 
     boolean played() {
@@ -287,8 +291,9 @@ final class PlayerScenario {
             level.removeBlock(pos, false);
         }
 
-        // Picking up and tossing items (ItemScenario).
+        // Picking up and tossing items (ItemScenario), and items breaking or being used up (DestroyItemScenario).
         items.runWithPlayer(player, level, base);
+        destroyedItems.runWithPlayer(player, level, base);
 
         // A death the listener cancels (ServerPlayer overrides LivingEntity.die).
         cancelDeath = true;

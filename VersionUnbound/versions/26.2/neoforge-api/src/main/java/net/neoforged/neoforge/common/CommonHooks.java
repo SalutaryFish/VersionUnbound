@@ -36,6 +36,8 @@ import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEvent;
+import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
@@ -115,6 +117,15 @@ public class CommonHooks {
 
     public static boolean onLivingDrops(LivingEntity entity, DamageSource source, Collection<ItemEntity> drops, boolean recentlyHit) {
         return NeoForge.EVENT_BUS.post(new LivingDropsEvent(entity, source, drops, recentlyHit)).isCanceled();
+    }
+
+    public static LivingFallEvent onLivingFall(LivingEntity entity, double distance, float damageMultiplier) {
+        LivingFallEvent event = new LivingFallEvent(entity, distance, damageMultiplier);
+        return NeoForge.EVENT_BUS.post(event);
+    }
+
+    public static void onLivingJump(LivingEntity entity) {
+        NeoForge.EVENT_BUS.post(new LivingEvent.LivingJumpEvent(entity));
     }
 
     @Nullable

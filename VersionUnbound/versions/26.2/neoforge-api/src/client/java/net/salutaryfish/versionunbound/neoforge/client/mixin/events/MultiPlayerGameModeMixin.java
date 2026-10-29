@@ -25,6 +25,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import org.apache.commons.lang3.mutable.MutableObject;
 import org.jspecify.annotations.Nullable;
@@ -47,8 +48,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>Several of these sit in the lambdas vanilla hands to {@code startPrediction}, which runs them right away; they are
  * targeted by their names in the 26.2 jar. Not yet: the parts that call extension methods (Phase 2 step 5):
  * {@code onDestroyedByPlayer} in {@code destroyBlock}, {@code onItemUseFirst} and {@code doesSneakBypassUse} in
- * {@code performUseItemOn}, {@code shouldCauseBlockBreakReset}, the client block extensions' hit sound, and
- * {@code PlayerDestroyItemEvent}.
+ * {@code performUseItemOn}, {@code shouldCauseBlockBreakReset} and the client block extensions' hit sound.
+ * {@code PlayerDestroyItemEvent} fires when using an item (not on a block) leaves the hand empty, as in NeoForge.
  */
 @Mixin(MultiPlayerGameMode.class)
 abstract class MultiPlayerGameModeMixin {
@@ -154,5 +155,12 @@ abstract class MultiPlayerGameModeMixin {
             interactionResult.setValue(cancelResult);
             cir.setReturnValue(packet);
         }
+    }
+
+    // The item's use replaced the stack in the hand with an empty one.
+    @Inject(method = "lambda$useItem$0", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;setItemInHand(Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;)V", shift = At.Shift.AFTER))
+    private void versionunbound$destroyItemOnUse(InteractionHand hand, Player player, MutableObject<InteractionResult> interactionResult, int sequence,
+            CallbackInfoReturnable<Packet<?>> cir, @Local(ordinal = 0) ItemStack itemStack, @Local(ordinal = 1) ItemStack result) {
+        if (result.isEmpty()) EventHooks.onPlayerDestroyItem(player, itemStack, hand);
     }
 }

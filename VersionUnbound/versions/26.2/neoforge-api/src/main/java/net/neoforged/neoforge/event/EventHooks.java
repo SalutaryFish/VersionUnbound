@@ -30,7 +30,9 @@ import net.minecraft.world.level.storage.ServerLevelData;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
+import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
@@ -46,6 +48,10 @@ import org.jspecify.annotations.Nullable;
 // the others arrive with their events (player, interaction and block events, living and entity events, spawning, items,
 // explosions, loot, chunks, ...). A mod calling a method that isn't here yet gets NoSuchMethodError.
 public class EventHooks {
+    public static void onPlayerDestroyItem(Player player, ItemStack stack, @Nullable InteractionHand hand) {
+        NeoForge.EVENT_BUS.post(new PlayerDestroyItemEvent(player, stack, hand));
+    }
+
     public static int onItemUseStart(LivingEntity entity, ItemStack item, InteractionHand hand, int duration) {
         var event = new LivingEntityUseItemEvent.Start(entity, item, hand, duration);
         return NeoForge.EVENT_BUS.post(event).isCanceled() ? -1 : event.getDuration();
@@ -103,6 +109,11 @@ public class EventHooks {
 
     public static boolean onCreateWorldSpawn(Level level, ServerLevelData settings) {
         return NeoForge.EVENT_BUS.post(new LevelEvent.CreateSpawnPosition(level, settings)).isCanceled();
+    }
+
+    public static float onLivingHeal(LivingEntity entity, float amount) {
+        LivingHealEvent event = new LivingHealEvent(entity, amount);
+        return (NeoForge.EVENT_BUS.post(event).isCanceled() ? 0 : event.getAmount());
     }
 
     public static void fireChunkTicketLevelUpdated(ServerLevel level, long chunkPos, int oldTicketLevel, int newTicketLevel, @Nullable ChunkHolder chunkHolder) {

@@ -2,12 +2,14 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Cancellable;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalDoubleRef;
+import com.llamalad7.mixinextras.sugar.ref.LocalFloatRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalIntRef;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -21,6 +23,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.gameevent.GameEvent;
@@ -29,6 +32,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
+import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
@@ -46,8 +50,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * NeoForge's patch to {@code LivingEntity}, for the events it fires: the damage pipeline (incoming damage, damage pre
  * and post, around a stack of {@link DamageContainer}s), death (cancellable), drops (the death loot is captured and
  * added to the level unless the event is canceled; {@code drop} adds to the capture too, which covers a player's
- * inventory and tossed items), knockback, equipment changes, and item use (start, tick, stop and
- * finish). {@code ServerPlayer.die} fires the death event itself
+ * inventory and tossed items), knockback, equipment changes, item use (start, tick, stop and finish, and
+ * {@code PlayerDestroyItemEvent} when releasing uses up a player's item), healing, falling and jumping (the mobs that
+ * jump their own way fire it in their own mixins). {@code ServerPlayer.die} fires the death event itself
  * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}).
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
@@ -75,6 +80,9 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers {
 
     @Shadow
     protected int useItemRemaining;
+
+    @Shadow
+    protected ItemStack useItem;
 
     @Shadow
     public abstract int getUseItemRemainingTicks();
@@ -291,10 +299,44 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers {
         return EventHooks.onItemUseFinish(entity, copy, this.getUseItemRemainingTicks(), original.call(useItem, level, entity));
     }
 
-    // Not yet: PlayerDestroyItemEvent when releasing uses up a player's item.
-    @WrapWithCondition(method = "releaseUsingItem", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;releaseUsing(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;I)V"))
-    private boolean versionunbound$useItemStop(ItemStack useItem, Level level, LivingEntity entity, int remaining) {
-        return !EventHooks.onUseItemStop(entity, useItem, remaining);
+    // A canceled stop keeps the item from being released; a player's item used up by the release fires
+    // PlayerDestroyItemEvent (NeoForge checks the useItem field afterwards, not the stack it released).
+    @WrapOperation(method = "releaseUsingItem", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;releaseUsing(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;I)V"))
+    private void versionunbound$useItemStop(ItemStack useItem, Level level, LivingEntity entity, int remaining, Operation<Void> original) {
+        if (!EventHooks.onUseItemStop(entity, useItem, remaining)) {
+            ItemStack copy = entity instanceof Player ? useItem.copy() : null;
+            original.call(useItem, level, entity, remaining);
+            if (copy != null && this.useItem.isEmpty()) EventHooks.onPlayerDestroyItem((Player) entity, copy, entity.getUsedItemHand());
+        }
+    }
+
+    // NeoForge's code at the head of heal: the event can change the amount, and nothing heals if it's canceled or
+    // the amount isn't positive.
+    @Inject(method = "heal", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$livingHeal(float amount, CallbackInfo ci, @Local(argsOnly = true) LocalFloatRef heal) {
+        heal.set(EventHooks.onLivingHeal((LivingEntity) (Object) this, heal.get()));
+        if (heal.get() <= 0) ci.cancel();
+    }
+
+    // After the fall distance is adjusted for the current impulse, before the super call: a canceled fall causes no
+    // damage, and the event's distance and multiplier replace vanilla's for the rest of the method. (A super call's
+    // receiver is typed as the calling class.)
+    @WrapOperation(method = "causeFallDamage", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;causeFallDamage(DFLnet/minecraft/world/damagesource/DamageSource;)Z"))
+    private boolean versionunbound$livingFall(LivingEntity entity, double effectiveFallDistance, float damageModifier, DamageSource source, Operation<Boolean> original,
+            @Local(ordinal = 1) LocalDoubleRef distance, @Local(argsOnly = true) LocalFloatRef modifier, @Cancellable CallbackInfoReturnable<Boolean> cir) {
+        LivingFallEvent event = CommonHooks.onLivingFall(entity, effectiveFallDistance, damageModifier);
+        if (event.isCanceled()) {
+            cir.setReturnValue(false);
+            return false;
+        }
+        distance.set(event.getDistance());
+        modifier.set(event.getDamageMultiplier());
+        return original.call(entity, event.getDistance(), event.getDamageMultiplier(), source);
+    }
+
+    @Inject(method = "jumpFromGround", at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/LivingEntity;needsSync:Z", opcode = Opcodes.PUTFIELD, shift = At.Shift.AFTER))
+    private void versionunbound$livingJump(CallbackInfo ci) {
+        CommonHooks.onLivingJump((LivingEntity) (Object) this);
     }
 
     // Neo: Fire the LivingDeathEvent after validating that the entity isn't already dead, but before trying to kill it.

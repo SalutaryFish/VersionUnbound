@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -16,16 +17,25 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.portal.TeleportTransition;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEvent;
+import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
+import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.salutaryfish.versionunbound.testmod.events.mixin.AbstractHorseInvoker;
 
 /**
  * Server-side checks of more living events, set up once the server has started: target changes (set, canceled,
- * redirected), knockback (and canceled), an equipment change (seen on the entity's next tick), and item use (start,
- * changed duration, canceled, stop, and a use that ticks and finishes while the server runs). The end-of-run checks are
- * in {@link #finish()}.
+ * redirected), knockback (and canceled), an equipment change (seen on the entity's next tick), item use (start,
+ * changed duration, canceled, stop, and a use that ticks and finishes while the server runs), teleports of a mob (within
+ * the overworld, to the nether, and canceled), healing (changed and canceled), fall damage (as is, with a doubled
+ * multiplier, and canceled), and the five kinds of jump. The end-of-run checks are in {@link #finish()}.
  */
 final class LivingScenario {
     private final Checks checks;
@@ -44,6 +54,15 @@ final class LivingScenario {
     private boolean helmetSeen;
     private Entity refused;
     private Entity quick;
+    private final Map<Entity, ResourceKey<Level>> travels = Collections.synchronizedMap(new IdentityHashMap<>());
+    private Entity stayingHome;
+    private final Map<Entity, Float> heals = Collections.synchronizedMap(new IdentityHashMap<>());
+    private Entity boostedHeal;
+    private Entity refusedHeal;
+    private final Map<Entity, Double> falls = Collections.synchronizedMap(new IdentityHashMap<>());
+    private Entity hardFall;
+    private Entity canceledFall;
+    private final Map<Entity, Integer> jumps = Collections.synchronizedMap(new IdentityHashMap<>());
 
     LivingScenario(Checks checks) {
         this.checks = checks;
@@ -77,6 +96,27 @@ final class LivingScenario {
             case LivingEntityUseItemEvent.Finish finish -> finishes.put(entity, true);
             default -> {}
         }
+    }
+
+    void travelToDimension(EntityTravelToDimensionEvent event) {
+        travels.put(event.getEntity(), event.getDimension());
+        if (event.getEntity() == stayingHome) event.setCanceled(true);
+    }
+
+    void heal(LivingHealEvent event) {
+        heals.put(event.getEntity(), event.getAmount());
+        if (event.getEntity() == boostedHeal) event.setAmount(event.getAmount() * 2);
+        if (event.getEntity() == refusedHeal) event.setCanceled(true);
+    }
+
+    void fall(LivingFallEvent event) {
+        falls.put(event.getEntity(), event.getDistance());
+        if (event.getEntity() == hardFall) event.setDamageMultiplier(event.getDamageMultiplier() * 2);
+        if (event.getEntity() == canceledFall) event.setCanceled(true);
+    }
+
+    void jump(LivingEvent.LivingJumpEvent event) {
+        jumps.merge(event.getEntity(), 1, Integer::sum);
     }
 
     void run(ServerLevel level, double x, double y, double z) {
@@ -127,6 +167,73 @@ final class LivingScenario {
         quick = quickUser;
         quickUser.startUsingItem(InteractionHand.MAIN_HAND);
         checks.check("LivingEntityUseItemEvent.Start can change the use duration", quickUser.isUsingItem() && quickUser.getUseItemRemainingTicks() == 2);
+
+        teleports(level, x, y, z);
+        healing(level, x, y, z);
+        falling(level, x, y, z);
+
+        LivingEntity zombie = spawn(level, EntityTypes.ZOMBIE, x, y, z);
+        zombie.jumpFromGround();
+        LivingEntity slime = spawn(level, EntityTypes.SLIME, x, y, z);
+        slime.jumpFromGround();
+        LivingEntity magmaCube = spawn(level, EntityTypes.MAGMA_CUBE, x, y, z);
+        magmaCube.jumpFromGround();
+        LivingEntity horse = spawn(level, EntityTypes.HORSE, x, y, z);
+        ((AbstractHorseInvoker) horse).events$executeRidersJump(1.0F, Vec3.ZERO);
+        LivingEntity camel = spawn(level, EntityTypes.CAMEL, x, y, z);
+        ((AbstractHorseInvoker) camel).events$executeRidersJump(1.0F, Vec3.ZERO);
+        checks.check("LivingJumpEvent fires once for a mob's, a slime's, a magma cube's, a horse's and a camel's jump",
+                List.of(zombie, slime, magmaCube, horse, camel).stream().map(entity -> jumps.getOrDefault(entity, 0)).toList(), List.of(1, 1, 1, 1, 1));
+    }
+
+    // Every teleport fires the event (players have their own, in PlayerScenario); a mob that changes level arrives as a
+    // new entity, which is discarded again, so nothing is left in the nether.
+    private void teleports(ServerLevel level, double x, double y, double z) {
+        ServerLevel nether = level.getServer().getLevel(Level.NETHER);
+        LivingEntity walker = spawn(level, EntityTypes.CHICKEN, x, y, z);
+        walker.teleport(new TeleportTransition(level, new Vec3(x, y + 1, z), Vec3.ZERO, 0, 0, TeleportTransition.DO_NOTHING));
+        checks.check("EntityTravelToDimensionEvent fires for a mob's teleport within a level", travels.get(walker), Level.OVERWORLD);
+        LivingEntity traveler = spawn(level, EntityTypes.CHICKEN, x, y, z);
+        Entity arrived = traveler.teleport(new TeleportTransition(nether, new Vec3(0.5, 64, 0.5), Vec3.ZERO, 0, 0, TeleportTransition.DO_NOTHING));
+        checks.check("EntityTravelToDimensionEvent fires for a mob going to the nether, which then arrives there",
+                travels.get(traveler) == Level.NETHER && arrived != null && arrived.level() == nether && traveler.isRemoved());
+        if (arrived != null) arrived.discard();
+        LivingEntity homebody = spawn(level, EntityTypes.CHICKEN, x, y, z);
+        stayingHome = homebody;
+        Entity notArrived = homebody.teleport(new TeleportTransition(nether, new Vec3(0.5, 64, 0.5), Vec3.ZERO, 0, 0, TeleportTransition.DO_NOTHING));
+        checks.check("canceling EntityTravelToDimensionEvent keeps the mob where it is",
+                travels.get(homebody) == Level.NETHER && notArrived == null && !homebody.isRemoved() && homebody.level() == level);
+    }
+
+    private void healing(ServerLevel level, double x, double y, double z) {
+        LivingEntity patient = wounded(spawn(level, EntityTypes.CHICKEN, x, y, z));
+        patient.heal(1.0F);
+        checks.check("LivingHealEvent fires with the amount, and the entity heals", heals.get(patient) != null && heals.get(patient) == 1.0F && patient.getHealth() == 2.0F);
+        LivingEntity boosted = wounded(spawn(level, EntityTypes.CHICKEN, x, y, z));
+        boostedHeal = boosted;
+        boosted.heal(1.0F);
+        checks.check("LivingHealEvent can change the amount healed", boosted.getHealth(), 3.0F);
+        LivingEntity refusing = wounded(spawn(level, EntityTypes.CHICKEN, x, y, z));
+        refusedHeal = refusing;
+        refusing.heal(1.0F);
+        checks.check("canceling LivingHealEvent stops the healing", heals.containsKey(refusing) && refusing.getHealth() == 1.0F);
+    }
+
+    // Zombies, since chickens take no fall damage. The damage goes through the damage pipeline (DamageScenario only
+    // changes its own chickens).
+    private void falling(ServerLevel level, double x, double y, double z) {
+        LivingEntity faller = spawn(level, EntityTypes.ZOMBIE, x, y, z);
+        boolean hurt = faller.causeFallDamage(10.0, 1.0F, level.damageSources().fall());
+        float damage = faller.getMaxHealth() - faller.getHealth();
+        checks.check("LivingFallEvent fires with the fall distance, and the fall hurts", falls.get(faller) != null && falls.get(faller) == 10.0 && hurt && damage > 0.0F);
+        LivingEntity hard = spawn(level, EntityTypes.ZOMBIE, x, y, z);
+        hardFall = hard;
+        hard.causeFallDamage(10.0, 1.0F, level.damageSources().fall());
+        checks.check("LivingFallEvent's damage multiplier changes the fall damage", hard.getMaxHealth() - hard.getHealth(), 2 * damage);
+        LivingEntity soft = spawn(level, EntityTypes.ZOMBIE, x, y, z);
+        canceledFall = soft;
+        boolean softHurt = soft.causeFallDamage(10.0, 1.0F, level.damageSources().fall());
+        checks.check("canceling LivingFallEvent stops the fall damage", falls.containsKey(soft) && !softHurt && soft.getHealth() == soft.getMaxHealth());
     }
 
     /** When the server stops: the zombie saw its helmet and the short use ran out, then the entities go. */
@@ -141,6 +248,11 @@ final class LivingScenario {
         entity.setPos(x, y, z);
         level.addFreshEntity(entity);
         spawned.add(entity);
+        return entity;
+    }
+
+    private static LivingEntity wounded(LivingEntity entity) {
+        entity.setHealth(1.0F);
         return entity;
     }
 

@@ -47,11 +47,15 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEvent;
+import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
+import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
@@ -160,6 +164,18 @@ final class ServerEvents {
             });
         }
         // Items and chunk data: these fire only on the server.
+        bus.addListener(LivingHealEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().living.heal(event);
+        });
+        bus.addListener(LivingFallEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().living.fall(event);
+        });
+        bus.addListener(LivingEvent.LivingJumpEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().living.jump(event);
+        });
+        bus.addListener(PlayerDestroyItemEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().destroyedItems.destroyItem(event);
+        });
         bus.addListener(ItemExpireEvent.class, event -> session().items.expire(event));
         bus.addListener(ItemEntityPickupEvent.Pre.class, event -> session().items.pickupPre(event));
         bus.addListener(ItemEntityPickupEvent.Post.class, event -> session().items.pickupPost(event));
@@ -205,7 +221,10 @@ final class ServerEvents {
         bus.addListener(AttackEntityEvent.class, event -> {
             if (!event.getEntity().level().isClientSide()) session().players.attack(event);
         });
-        bus.addListener(EntityTravelToDimensionEvent.class, event -> session().players.travelToDimension(event));
+        bus.addListener(EntityTravelToDimensionEvent.class, event -> {
+            session().players.travelToDimension(event);
+            session().living.travelToDimension(event);
+        });
         bus.addListener(PlayerEvent.PlayerChangedDimensionEvent.class, event -> session().players.changedDimension(event));
         bus.addListener(PlayerRespawnPositionEvent.class, event -> session().players.respawnPosition(event));
         bus.addListener(PlayerEvent.Clone.class, event -> session().players.cloned(event));
@@ -256,7 +275,8 @@ final class ServerEvents {
         private final LivingScenario living = new LivingScenario(checks);
         private final ItemScenario items = new ItemScenario(checks, playerChecks, joins);
         private final ChunkScenario chunks = new ChunkScenario(checks, playerChecks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items);
+        private final DestroyItemScenario destroyedItems = new DestroyItemScenario(playerChecks);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;

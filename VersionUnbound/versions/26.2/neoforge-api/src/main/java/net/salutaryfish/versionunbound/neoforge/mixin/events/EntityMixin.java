@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.event.EventHooks;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
@@ -16,12 +17,14 @@ import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * NeoForge's patch to {@code Entity}: a passenger's tick fires the entity tick events too (entities that aren't
  * passengers are ticked by their level, see {@code ServerLevelMixin} and {@code ClientLevelMixin}), drop capture
- * ({@link EntityDropsCapture}), which {@code LivingDropsEvent} uses, and {@code EntityInvulnerabilityCheckEvent}, which
- * gets vanilla's answer and decides.
+ * ({@link EntityDropsCapture}), which {@code LivingDropsEvent} uses, {@code EntityInvulnerabilityCheckEvent}, which
+ * gets vanilla's answer and decides, and {@code EntityTravelToDimensionEvent} for every teleport (cancellable).
  */
 @Mixin(Entity.class)
 abstract class EntityMixin implements EntityDropsCapture {
@@ -53,6 +56,12 @@ abstract class EntityMixin implements EntityDropsCapture {
     @ModifyReturnValue(method = "isInvulnerableToBase", at = @At("RETURN"))
     private boolean versionunbound$invulnerabilityCheck(boolean isVanillaInvulnerable, @Local(argsOnly = true) DamageSource source) {
         return CommonHooks.isEntityInvulnerableTo((Entity) (Object) this, source, isVanillaInvulnerable);
+    }
+
+    // ServerPlayer has its own teleport (ServerPlayerMixin); the other overrides call this one.
+    @Inject(method = "teleport", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$travelToDimension(TeleportTransition transition, CallbackInfoReturnable<Entity> cir) {
+        if (!CommonHooks.onTravelToDimension((Entity) (Object) this, transition.newLevel().dimension())) cir.setReturnValue(null);
     }
 
     @WrapOperation(method = "spawnAtLocation(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/phys/Vec3;)Lnet/minecraft/world/entity/item/ItemEntity;",

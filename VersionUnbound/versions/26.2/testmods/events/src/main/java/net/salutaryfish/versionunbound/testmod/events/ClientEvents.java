@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -24,6 +25,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -36,8 +38,8 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.MinecraftAccessor;
 /**
  * Client-side checks, for a client that joins a world (singleplayer or a server). After {@value #ACT_AT} client ticks in
  * the level (once the server's player scenario, with its respawn, is over), the client drives its own interaction code:
- * right click on a block and with the hand, left click on a block, a block break, and clicks at nothing; some of these
- * canceled. At {@value #LEAVE_AT} ticks the first checks run (including a chunk the client is made to drop, as when the
+ * right click on a block and with the hand, an item used up, left click on a block, a block break, and clicks at
+ * nothing; some of these canceled. At {@value #LEAVE_AT} ticks the first checks run (including a chunk the client is made to drop, as when the
  * server forgets it) and the client leaves the world; the logging-out and unload checks follow on the next tick, then
  * the summary. Every listener runs on the render thread; events for the integrated
  * server's levels and entities are filtered out.
@@ -76,6 +78,7 @@ final class ClientEvents {
     private static int chunkLoads;
     private static boolean chunkLoadsConsistent = true;
     private static ChunkEvent.Unload chunkUnload;
+    private static PlayerDestroyItemEvent destroyedItem;
 
     private static final Set<LocalPlayer> joinedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> leftPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -172,6 +175,9 @@ final class ClientEvents {
         bus.addListener(ChunkEvent.Unload.class, event -> {
             if (event.getLevel() instanceof ClientLevel) chunkUnload = event;
         });
+        bus.addListener(PlayerDestroyItemEvent.class, event -> {
+            if (event.getEntity().level().isClientSide()) destroyedItem = event;
+        });
         bus.addListener(PlayerInteractEvent.RightClickEmpty.class, event -> rightClickEmpty++);
         bus.addListener(PlayerInteractEvent.LeftClickEmpty.class, event -> leftClickEmpty++);
     }
@@ -215,6 +221,13 @@ final class ClientEvents {
         cancelClicks = false;
         CHECKS.check("canceling RightClickBlock and RightClickItem on the client returns their cancellation results",
                 canceledBlock == InteractionResult.FAIL && canceledItem == InteractionResult.FAIL);
+
+        // An item whose use leaves the hand empty, put there on the client only (the server's hand stays empty).
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(EventsMod.VANISHING_ITEM.get()));
+        gameMode.useItem(player, InteractionHand.MAIN_HAND);
+        CHECKS.check("PlayerDestroyItemEvent fires on the client when using an item leaves the hand empty",
+                destroyedItem != null && destroyedItem.getEntity() == player && destroyedItem.getHand() == InteractionHand.MAIN_HAND
+                        && destroyedItem.getOriginal().is(EventsMod.VANISHING_ITEM.get()) && player.getMainHandItem().isEmpty());
 
         gameMode.startDestroyBlock(ground, Direction.UP);
         gameMode.stopDestroyBlock();

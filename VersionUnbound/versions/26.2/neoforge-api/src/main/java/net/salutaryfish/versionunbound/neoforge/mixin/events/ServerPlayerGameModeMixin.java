@@ -4,6 +4,7 @@ import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.core.BlockPos;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
@@ -34,13 +36,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * NeoForge's patch to {@code ServerPlayerGameMode}, for the events it fires: left click block (cancellable; its use-block
- * result can skip the block's attack), block break (in place of vanilla's {@code canDestroyBlock} check), right click
- * item and right click block (cancellable; its use-block and use-item results override vanilla's choices).
+ * result can skip the block's attack), block break (in place of vanilla's {@code canDestroyBlock} check), the tool
+ * breaking ({@code PlayerDestroyItemEvent}), right click item and right click block (cancellable; its use-block and
+ * use-item results override vanilla's choices).
  *
  * <p>Not yet: the parts of the patch that call extension methods (Phase 2 step 5): {@code onItemUseFirst} and
  * {@code doesSneakBypassUse} in {@code useItemOn}, and in {@code destroyBlock} the removal through
- * {@code onDestroyedByPlayer} after the tool is used, {@code canHarvestBlock} and {@code PlayerDestroyItemEvent}.
- * Vanilla's behavior stands in, which is what the extension methods' defaults do. Nor NeoForge's change to
+ * {@code onDestroyedByPlayer} after the tool is used and {@code canHarvestBlock}. Vanilla's behavior stands in, which
+ * is what the extension methods' defaults do. Nor NeoForge's change to
  * {@code setGameModeForPlayer} that keeps a player flying.
  */
 @Mixin(ServerPlayerGameMode.class)
@@ -72,6 +75,14 @@ abstract class ServerPlayerGameModeMixin {
     @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;canDestroyBlock(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;)Z"))
     private boolean versionunbound$breakBlock(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, Operation<Boolean> original) {
         return !CommonHooks.fireBlockBreak(level, this.gameModeForPlayer, player, pos, state).isCanceled();
+    }
+
+    // Neo: Fire the PlayerDestroyItemEvent if the tool was broken at any point during the break process
+    @Inject(method = "destroyBlock", at = @At("TAIL"))
+    private void versionunbound$destroyItemOnBreak(BlockPos pos, CallbackInfoReturnable<Boolean> cir, @Local(ordinal = 0) ItemStack itemStack, @Local(ordinal = 1) ItemStack destroyedWith) {
+        if (itemStack.isEmpty() && !destroyedWith.isEmpty()) {
+            EventHooks.onPlayerDestroyItem(this.player, destroyedWith, InteractionHand.MAIN_HAND);
+        }
     }
 
     // After the spectator and cooldown checks, before the item is used.
