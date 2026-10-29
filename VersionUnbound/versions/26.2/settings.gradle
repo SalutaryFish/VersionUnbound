@@ -20,5 +20,6 @@ include 'testmods:hello'
 include 'testmods:metadata'
 include 'testmods:lifecycle'
 include 'testmods:registries'
+include 'testmods:events'
 // A Fabric mod that records when Fabric initializes its mods and what it sees in the registries, for the NeoForge testmods.
 include 'testmods:fabricprobe'

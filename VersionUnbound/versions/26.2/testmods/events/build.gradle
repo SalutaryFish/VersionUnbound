@@ -1,0 +1,15 @@
+// A genuine NeoForge 26.2 mod: compiled against NeoForge's own artifacts (not Layer A),
+// so loading it exercises the same binary interface a real mod would.
+// Loom is only used to put Minecraft 26.2 on the compile classpath.
+apply plugin: 'net.fabricmc.fabric-loom'
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	// Mixin annotations.
+	compileOnly "net.fabricmc:fabric-loader:${loader_version}"
+
+	compileOnly "net.neoforged:neoforge:${neoforge_version}:universal"
+	compileOnly "net.neoforged.fancymodloader:loader:${fml_version}"
+	compileOnly "net.neoforged:bus:${eventbus_version}"
+	compileOnly "net.neoforged:mergetool:${mergetool_version}:api"
+}

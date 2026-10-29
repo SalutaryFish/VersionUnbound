@@ -1,0 +1,104 @@
+package net.salutaryfish.versionunbound.neoforge.mixin.events;
+
+import com.google.common.base.Preconditions;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.common.damagesource.DamageContainer;
+import net.neoforged.neoforge.event.EventHooks;
+import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+/**
+ * NeoForge's patch to {@code Player}, for the events it fires: player ticks (wrapping {@code Player.tick()}, so inside
+ * the entity tick events), entity interaction and attack (both cancellable, on both sides), and the damage pipeline in
+ * the player's own {@code actuallyHurt} (see {@code LivingEntityMixin}). Not yet: {@code PlayerDestroyItemEvent} when an
+ * interaction uses up the held item.
+ */
+@Mixin(Player.class)
+abstract class PlayerMixin {
+    @Inject(method = "tick", at = @At("HEAD"))
+    private void versionunbound$playerTickPre(CallbackInfo ci) {
+        EventHooks.firePlayerTickPre((Player) (Object) this);
+    }
+
+    @Inject(method = "tick", at = @At("TAIL"))
+    private void versionunbound$playerTickPost(CallbackInfo ci) {
+        EventHooks.firePlayerTickPost((Player) (Object) this);
+    }
+
+    // After the spectator check, before the entity is interacted with.
+    @Inject(method = "interactOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;getItemInHand(Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/item/ItemStack;", ordinal = 0), cancellable = true)
+    private void versionunbound$interactEntity(Entity entity, InteractionHand hand, Vec3 location, CallbackInfoReturnable<InteractionResult> cir) {
+        InteractionResult cancelResult = CommonHooks.onInteractEntity((Player) (Object) this, entity, hand, location);
+        if (cancelResult != null) cir.setReturnValue(cancelResult);
+    }
+
+    @Inject(method = "attack", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$attackEntity(Entity entity, CallbackInfo ci) {
+        if (!CommonHooks.onPlayerAttackTarget((Player) (Object) this, entity)) ci.cancel();
+    }
+
+    /**
+     * @author NeoForge (ported by VersionUnbound)
+     * @reason NeoForge's damage pipeline, the player's copy of {@code LivingEntity.actuallyHurt}'s. LivingEntity's
+     *         protected members are reached through {@link LivingEntityDamageContainers}.
+     */
+    @Overwrite
+    protected void actuallyHurt(ServerLevel level, DamageSource source, float dmg) {
+        Player self = (Player) (Object) this;
+        if (!self.isInvulnerableTo(level, source)) {
+            LivingEntityDamageContainers containers = (LivingEntityDamageContainers) this;
+            DamageContainer container = containers.versionunbound$currentDamageContainer(source, dmg);
+            // Neo (ImplNote): Keep this in-sync with the equivalent patches in LivingEntity#actuallyHurt.
+            // Neo: Primary damage pipeline hooks. Compute the armor and enchantment reductions against the "original" damage, and then fire LivingDamageEvent.Pre
+            container.setReduction(DamageContainer.Reduction.ARMOR, container.getNewDamage() - containers.versionunbound$getDamageAfterArmorAbsorb(source, container.getNewDamage()));
+            containers.versionunbound$getDamageAfterMagicAbsorb(source, container.getNewDamage());
+
+            // LivingDamageEvent.Pre is then able to mutate the container to change the reductions and change the "real" damage that will be inflicted.
+            float damage = CommonHooks.onLivingDamagePre(self, container);
+            // Throw an exception if someone kills the entity during Pre. Vanilla is going to kill any entity which isDeadOrDying() when it bubbles back up to hurtServer, so it dying early is invalid.
+            Preconditions.checkArgument(!containers.versionunbound$isDead(), "It is invalid to have killed an entity during LivingDamageEvent.Pre. Use LivingIncomingDamageEvent or LivingDamageEvent.Post instead.");
+
+            // Store a copy of the "true" inflicted damage so we can propagate it back to hurtServer.
+            container.captureInflictedDamage();
+
+            // Next we attribute damage to absorption hearts. We record the amount blocked by absorption in the container for later calculations.
+            // Mods reduction functions may adjust the split of damage between absorption and health, so we need to first apply the reductions and then compute the amounts that go to each pool.
+            container.setReduction(DamageContainer.Reduction.ABSORPTION, Math.min(self.getAbsorptionAmount(), damage));
+            float absorbed = Math.min(damage, container.getReduction(DamageContainer.Reduction.ABSORPTION));
+            self.setAbsorptionAmount(Math.max(0, self.getAbsorptionAmount() - absorbed));
+            dmg = container.getNewDamage();
+            float absorbedDamage = absorbed;
+            if (absorbedDamage > 0.0F && absorbedDamage < 3.4028235E37F) {
+                self.awardStat(Stats.DAMAGE_ABSORBED, Math.round(absorbedDamage * 10.0F));
+            }
+
+            // Last thing here, inflict damage to the entity's health, based on how much damage is remaining after absorption has been processes.
+            if (dmg != 0.0F) {
+                self.causeFoodExhaustion(source.getFoodExhaustion());
+                self.getCombatTracker().recordDamage(source, dmg);
+                self.setHealth(self.getHealth() - dmg);
+                if (dmg < 3.4028235E37F) {
+                    self.awardStat(Stats.DAMAGE_TAKEN, Math.round(dmg * 10.0F));
+                }
+
+                self.gameEvent(GameEvent.ENTITY_DAMAGE);
+            }
+
+            // Neo: Now we go back to hurtServer, where we'll update various metadata fields, process the side effects of damage (i.e. killing the entity), and firing LivingDamageEvent.Post
+        }
+    }
+}

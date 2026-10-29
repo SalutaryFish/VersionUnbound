@@ -1,6 +1,8 @@
 # VersionUnbound — Handoff
 
-State as of 2026-10-28. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 steps 1 (FML metadata and context), 2 (lifecycle ordering) and 3 (registries) are done. **Next: Phase 2 step 4, game bus and common events** (§8).
+State as of 2026-10-29. Phase 0 (workspace), Phase 1 (loader spike) and Phase 2 steps 1 (FML metadata and context), 2 (lifecycle ordering) and 3 (registries) are done. Phase 2 step 4 (game bus and common events) is in progress: **4a (server lifecycle, commands, ticks, levels) and 4b (player and interaction events) are done; 4c (living and entity events) has entity join/leave, death, drops, the damage pipeline, target changes, knockback, equipment changes and item use; next are item pickup and chunk events** (§8).
+
+Git: step 3 is not committed yet (the user commits when asked). A snapshot of the tree at the end of step 3 is the unreferenced commit object `8576e2d114e434611d8a5fd0864838e5e00871a4` (not on any branch), so steps 3 and 4 can still become separate commits: commit that snapshot's tree first, then the rest.
 
 The full approved plan is at `/home/username/.claude/plans/alright-our-goal-is-abstract-sparrow.md`. This file is self-contained, so you don't need the plan to continue.
 
@@ -23,7 +25,7 @@ Decisions the user made (don't re-ask):
 Phases:
 - **0. Workspace** ✅
 - **1. Loader spike** ✅
-- **2. Layer A core** ← in progress (steps 1–3 done, step 4 next)
+- **2. Layer A core** ← in progress (steps 1–3 done, step 4 in progress)
 - **3. Layer B MVP.** Milestone: the unmodified Chunky 1.21.1 jar runs a pregen on a Fabric 26.2 server.
 - **4. Content mods, server side:** Toms Storage → FarmersDelight → KaleidoscopeCookery → DynamicTrees.
 - **5. Client shims.** GUI, renderers and models; the largest open-ended phase.
@@ -82,7 +84,20 @@ Key files inside the NeoForge 26.2 clone:
   - Piping `stop` into Gradle works: stdin is forwarded to the server.
   - **The client doesn't exit on its own.** Once `[lifecycle] all N checks passed` (or `FAILED`) shows up, kill the game JVM: the `java` process whose `/proc/<pid>/cmdline` contains `net.fabricmc.devlaunchinjector.Main` (pick it with `pgrep -x java`). Gradle then reports exit value 143 and BUILD FAILED, which is expected. Don't use `pkill -f` with that pattern from a script: it also matches the shell running the script and kills it.
   - Under Xvfb the client renders with Mesa llvmpipe (OpenGL 4.6). Mesa's "vulkan: No DRI3 support" note is harmless.
-  - **Client joining the dev server** (checks registry sync end to end): start `runServer`, wait for "Done (", then run the client with `./gradlew :loader:runClient --args='--quickPlayMultiplayer localhost:25565'`. Two local settings in the git-ignored `loader/run/` make this work: `online-mode=false` and `enforce-secure-profile=false` in `server.properties` (the dev client is offline), and `onboardAccessibility:false` in `options.txt` (otherwise vanilla shows the accessibility onboarding screen first, and quick play waits until someone dismisses it). Stop the client by killing the JVM whose cmdline contains `fabric.dli.env=client`; the server's "left the game" line then tells the stop loop to send `stop`.
+  - **Client joining the dev server** (checks registry sync end to end, and step 4's player and client checks): start `runServer`, wait for "Done (", then run the client with `./gradlew :loader:runClient --args='--quickPlayMultiplayer localhost:25565'`. A script for it (run it in the background; `SLOG`/`CLOG` in the scratchpad):
+    ```bash
+    cd <repo>/VersionUnbound/versions/26.2; MARK=$SLOG.client-done; rm -f $MARK
+    ( for i in $(seq 1 150); do sleep 2; grep -qE 'Done \(|Failed to start|BUILD FAILED' $SLOG && break; done
+      for i in $(seq 1 150); do sleep 2; { grep -qE 'left the game|BUILD FAILED' $SLOG || [ -e $MARK ]; } && break; done; sleep 3; echo stop
+    ) | timeout 900 nix develop <repo> -c ./gradlew :loader:runServer --console=plain > $SLOG 2>&1 &
+    for i in $(seq 1 150); do sleep 2; grep -q 'Done (' $SLOG && break; done
+    timeout 600 nix develop <repo> -c xvfb-run -a -s '-screen 0 1600x900x24' ./gradlew :loader:runClient \
+      --args='--quickPlayMultiplayer localhost:25565' --console=plain > $CLOG 2>&1 & CLIENT=$!
+    for i in $(seq 1 180); do sleep 2; grep -qE '\[events\] (all [0-9]+ client checks passed|[0-9]+ of [0-9]+ client checks FAILED)|BUILD FAILED' $CLOG && break; done; sleep 3
+    for pid in $(pgrep -x java); do tr '\0' ' ' < /proc/$pid/cmdline | grep -q 'fabric.dli.env=client' && kill $pid; done
+    wait $CLIENT; touch $MARK; wait
+    ```
+    The client run takes about a minute; the `events` testmod's client checks end with a disconnect, so the server logs "left the game" on its own. Two local settings in the git-ignored `loader/run/` make this work: `online-mode=false` and `enforce-secure-profile=false` in `server.properties` (the dev client is offline), and `onboardAccessibility:false` in `options.txt` (otherwise vanilla shows the accessibility onboarding screen first, and quick play waits until someone dismisses it). Stop the client by killing the JVM whose cmdline contains `fabric.dli.env=client`; the server's "left the game" line then tells the stop loop to send `stop`.
 - **`mc-src <ver>...`** decompiles vanilla into `src/mc-<ver>/` and caches downloads in `~/.cache/mc-src/`.
   - **Obfuscated versions** (e.g. 1.21.1) go through four steps:
     1. AutoRenamingTool applies Mojang's mappings (`--reverse`).
@@ -115,7 +130,7 @@ Toolchain:
 All versions are in `gradle.properties`, including the NeoForge ones: `neoforge_version=26.2.0.93`, `neoform_version=2`, `fml_version=11.0.16`, `eventbus_version=8.0.5`, `typetools_version=0.6.3`, `mergetool_version=2.0.7`, `nightconfig_version=3.9.0`, `maven_artifact_version=3.9.16`. Group: `net.salutaryfish.versionunbound` (matches the user's other projects).
 
 ```
-settings.gradle      includes neoforge-api, loader, testmods:{hello,metadata,lifecycle,registries,fabricprobe}
+settings.gradle      includes neoforge-api, loader, testmods:{hello,metadata,lifecycle,registries,events,fabricprobe}
 build.gradle         root: applies loom (apply false); subprojects get java, NeoForged maven, Java 25. Task
                      generateTestmodClassTweaker writes testmods/neoforge-compile.classtweaker (see testmods below).
 neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
@@ -130,8 +145,13 @@ neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
                                                    IHolderSetExtension}, internal/{NeoForgeBindings, CommonModLoader,
                                                    RegistrationEvents}, server/loading/ServerModLoader, and since step 3
                                                    registries/ (+ callback/, datamaps/ types only, holdersets/): 45 files,
-                                                   31 verbatim (deviations below)
-  src/client/java/net/neoforged/neoforge/          client/loading/ClientModLoader
+                                                   31 verbatim (deviations below). Since step 4: event/ (verbatim event
+                                                   classes: server/, tick/, level/LevelEvent, entity/{EntityEvent,
+                                                   living/LivingEvent, player/PlayerEvent}, RegisterCommandsEvent,
+                                                   CommandEvent, GameShuttingDownEvent) and the partial hook classes
+                                                   event/EventHooks, common/CommonHooks, server/ServerLifecycleHooks
+  src/client/java/net/neoforged/neoforge/          client/loading/ClientModLoader; since step 4 client/event/ClientTickEvent
+                                                   (verbatim) and client/ClientHooks (partial)
   src/main/java/net/salutaryfish/versionunbound/neoforge/
     registries/MappedRegistryExtension   stands in for NeoForge's BaseMappedRegistry superclass (setSync, setMaxId, getDataMaps)
     patches/                             members NeoForge's patches add to vanilla classes: IdentifierExtension (compareNamespaced)
@@ -141,9 +161,34 @@ neoforge-api/        Fabric mod id `versionunbound_neoforge` (Layer A)
                                          MappedRegistryMixin, HolderReferenceMixin, HolderSetNamedMixin, RegistryMixin,
                                          RegistryLoadTaskMixin, PoiTypesMixin, BuiltInRegistriesMixin, BuiltInRegistriesAccessor
     mixin/server/MainMixin               versionunbound_neoforge.mixins.json ("server")
+    mixin/events/                        NeoForge's event-firing patches (step 4): MinecraftServerMixin (server started,
+                                         stopping, stopped, server and level ticks, level load and unload, world spawn),
+                                         CommandsMixin (RegisterCommandsEvent, CommandEvent), ServerLevelMixin (entity ticks,
+                                         level save), EntityMixin (passenger ticks), PlayerMixin (player ticks, entity
+                                         interaction, attack), PlayerListMixin (login, logout, respawn position, respawn),
+                                         ServerPlayerMixin (travel to dimension, changed dimension, clone),
+                                         ServerPlayerGameModeMixin (left/right click block, right click item, block break),
+                                         PersistentEntitySectionManagerMixin (entities joining), ServerLevelEntityCallbacksMixin
+                                         (entities leaving), LivingEntityMixin (death, drops; ServerPlayerMixin: player
+                                         death), EntityMixin (+ drop capture); and in "server": DedicatedServerMixin (about
+                                         to start, starting, shutting down)
+    patches/PersistentEntitySectionManagerExtension   NeoForge's addNewEntityWithoutEvent (for ServerLevel.addPlayer)
+    patches/EntityDropsCapture           NeoForge's captureDrops methods, added to Entity by EntityMixin (LivingDropsEvent)
+    patches/LivingEntityDamageContainers access to the damage container stack (and LivingEntity's protected members) for
+                                         the player's actuallyHurt, implemented by LivingEntityMixin
+    patches/WeightedListBuilderExtension + mixin/patches/WeightedListBuilderMixin   NeoForge's WeightedList.Builder patch
+                                         (mutable entries, add/addAll/remove/removeIf/getList), needed by LevelEvent
+    patches/TriStateExtension            NeoForge's isTrue/isDefault/isFalse on vanilla's TriState (interaction events)
   src/client/java/net/salutaryfish/versionunbound/neoforge/client/mixin/{MainMixin,MinecraftMixin}
                                                    versionunbound_neoforge.client.mixins.json; these 3 mixins are NeoForge's
                                                    loading hooks (the sequence is below)
+  src/client/java/net/salutaryfish/versionunbound/neoforge/client/mixin/events/{MinecraftMixin,ClientLevelMixin,
+                                         ClientLevelEntityCallbacksMixin,IntegratedServerMixin,MultiPlayerGameModeMixin,
+                                         ClientPacketListenerMixin}   entities joining and leaving the client level, client
+                                         ticks, client level ticks, load and unload, entity ticks, game shutting down,
+                                         empty clicks, logging out; the integrated server's about to start and starting;
+                                         the client's own interaction events (several inside startPrediction lambdas,
+                                         targeted by their 26.2 names); logging in and clone
   src/main/resources/versionunbound_neoforge.classtweaker   un-seals Holder (extendable), injects NeoForge's extension
                                                    interfaces (IRegistryExtension, IHolderExtension, IHolderSetExtension) and the
                                                    patches/ interfaces, widens RegistryOps.lookupProvider and PoiTypes.TYPE_BY_STATE.
@@ -180,6 +225,36 @@ testmods/registries/ genuine NeoForge 26.2 mod `registries`. 45 registration che
                      types, datapack registries (synced, and with RegistryBuilder options), and what fabricprobe saw.
                      Logs "[registries] all N registration checks passed" and "[registries] all N world checks passed".
                      Its bake callback logs each bake with the ids, which shows client-side remaps after joining a server.
+testmods/events/     genuine NeoForge 26.2 mod `events` (built like lifecycle), one check group per side. Since 4c the counts
+                     are server 56, server player 25, client 16. LivingScenario (at server started, finish() at stopping):
+                     a zombie's target set, canceled and redirected; a piglin (its brain loads the patched StartAttacking);
+                     knockback and a canceled one; a zombie given a helmet (seen on its next tick); golden apples used
+                     by chickens: start (32 ticks), release/stop, a canceled start, and a start cut to 2 ticks that ticks
+                     and finishes before the server stops. DamageScenario (at server started): chickens hurt with
+                     the incoming damage untouched, canceled, raised, doubled in Pre, the chicken made invulnerable, the
+                     invulnerability ticks dropped, iframes blocking a second hit, and an armored zombie (armor reduction
+                     in the container); the player takes one cactus hit (Player.actuallyHurt). Also: entities joining (once each, a canceled join keeps the
+                     entity out) and leaving, chickens that die (drops added), have their death canceled (and are healed)
+                     or their drops canceled, a canceled player death, the player joining and leaving levels on
+                     teleports and respawn, and on the client the local player joining and the old one leaving on
+                     respawn. Join counts are the evidence that an entity was added (see §5 on chunk visibility).
+                     Server (30 checks in 4a,
+                     summary at ServerStoppedEvent): the order of commands, SERVER config, about to start, level loads,
+                     world spawn (new worlds only), saves, starting, started, ticks, stopping, game shutting down, unloads
+                     and stopped (logged as "[events] server event order: [...]"); getCurrentServer; the SERVER config in
+                     config/ with world/serverconfig/readme.txt; a command registered in RegisterCommandsEvent, a canceled
+                     CommandEvent and replaced parse results; server, level and entity ticks, including a canceled entity
+                     tick and a passenger (three armor stands in a forced chunk at 0,0, removed again at stopping). Server
+                     players ("server player checks", 20, only once a player has played): PlayerScenario runs 20 ticks
+                     after login and drives the server's own code paths for that player: left click and break (allowed
+                     and canceled), right click on note blocks (used; use-block FALSE; use-block TRUE while sneaking with
+                     a stick; canceled with a result), right click item (and canceled), entity interaction and attack (and
+                     canceled), teleports (within the overworld, to the nether and back), then a respawn as from the End;
+                     login, logout and player ticks are checked when the server stops. Client (15 checks): at 60 ticks
+                     in the level it drives MultiPlayerGameMode (right click block and item, also canceled; start
+                     breaking; a canceled destroyBlock) and the empty clicks (an invoker mixin, events.mixins.json); at
+                     100 ticks it checks ticks, level load, LoggingIn and the respawn's Clone, then disconnects and checks
+                     LoggingOut and the level unload. Logs "[events] all N server|server player|client checks passed".
 testmods/neoforge-compile.classtweaker  generated (root task generateTestmodClassTweaker) from META-INF/injected-interfaces.json
                      in NeoForge's jar. The registries testmod sets it as Loom's accessWidenerPath, so javac sees NeoForge's
                      extension interfaces on vanilla classes and emits the same calls a NeoForge-built mod has (e.g.
@@ -231,6 +306,16 @@ NeoForge (`NeoForge`, `NeoForgeBindings`, the services file and the two extensio
   - `holdersets/AnyHolderSet`, `NotHolderSet`: call `RegistryOpsPatch.retrieveRegistryLookup` (a static method NeoForge adds to `RegistryOps`; see §5 on static methods).
 - What the mixins and class tweaker reproduce from NeoForge's patches: `MappedRegistry` (callbacks, `maxId`, data maps, `getId(key/name)`, `containsValue`, `resolve` through Fabric's aliases, `getKeyOrNull` without the default), `Holder` (un-sealed; `Reference` gets `getData`, the non-allocating `getKey`, key-based `equals`/`hashCode` and `unwrapLookup`), `HolderSet.Named` (invalidation listeners), `Registry.safeCastToReference` (unwraps `getDelegate()`), `RegistryLoadTask` (the builder consumer), `Identifier.compareNamespaced`, the data map getters on `HolderLookup.RegistryLookup`. Not reproduced: the explicit-id `MappedRegistry.register(int, …)`, `unfreeze`, `clear` and `registerIdMapping` (snapshot application only). NeoForge's patches drop two checks in `freeze` and keep intrusive holders around for refreezing; neither applies here, since registries freeze once.
 - Two of NeoForge's `MappedRegistry` changes are Fabric API's own already and are left to it: holders get their value as soon as they're registered, and aliases (Fabric's `addAlias` has NeoForge's signature).
+- Events (step 4). The event classes are verbatim. The hook classes are ported a method at a time, like `NeoForgeMod`: `EventHooks`, `CommonHooks` (empty so far; event javadoc links to it), `client/ClientHooks` (client ticks) and `server/ServerLifecycleHooks` (lifecycle, `getCurrentServer`, SERVER config load and unload; not biome/structure modifiers, `LanguageHook`, permissions, the JSON-RPC schema event). The mixins fire events at NeoForge's patch sites; where a site differs, the mixin says why:
+  - `ServerStoppingEvent`: NeoForge posts it at the end of `runServer`'s try block. The nearest instruction (`stopped = true`) is inside the try around `stopServer()`, so `MinecraftServerMixin` logs a listener's exception instead of letting it skip `stopServer` and the world save.
+  - Level load for the other dimensions wraps `Map.put` in `createLevels` (Fabric API wraps the same call for `ServerWorldEvents.LOAD`); level unload wraps `ServerLevel.close()`, so it fires only when the close succeeded, as in NeoForge.
+  - Server about to start fires just before `loadLevel()`, after vanilla's "Preparing level" log line (NeoForge: just before it).
+  - `CommandEvent` wraps `performCommand` with `@WrapMethod`.
+  - Not ported from those patches: the dedicated server's LAN pinger and console handler, per-level tick times, `getWorldArray`, the status JSON cache, branding.
+  - Interaction (4b). The use-block and use-item results of `RightClickBlock` override vanilla's choices by changing the values vanilla decides with (its `suppressUsingBlock` local, and the `isEmpty`/`isOnCooldown` checks before using the item), on both sides. `@Share` carries each event from the injector that fires it to the ones that apply it. The parts of these patches that call extension methods wait for step 5, with vanilla's behavior (what the defaults do) in their place: `onItemUseFirst`, `doesSneakBypassUse`, `onLeftClickEntity` (in `CommonHooks.onPlayerAttackTarget`, commented out), and in `destroyBlock` the removal through `onDestroyedByPlayer` after the tool is used with `canHarvestBlock`. Also waiting: `PlayerDestroyItemEvent`, the persisted part of the player's persistent data on clone, attachment sync at login/respawn/dimension change, `InputEvent.InteractionKeyMappingTriggered` around the clicks (Phase 5), the client block extensions' hit sound and `shouldCauseBlockBreakReset`.
+  - The client's `startDestroyBlock` fires the survival left click in the method and applies it in its prediction lambda, so the event goes through a field (`startPrediction` runs the lambda right away).
+  - `ClientPacketListenerMixin` uses `Minecraft.getInstance()` where NeoForge reads the listener's `minecraft` field: that field is declared in `ClientCommonPacketListenerImpl`, and `@Shadow` only finds fields declared on the target class.
+  - `common/ItemAbilities` (needed by `BlockEvent`): its two imports of step 5's extension interfaces, used only by javadoc links, are commented out.
 - `server/loading/ServerModLoader`: `load(boolean)` is split into `begin(boolean)` and `load()` for the two hook points. `LanguageHook` and the crash report dump (`CrashReportExtender`) aren't ported.
 - `client/loading/ClientModLoader`: only `begin()` and `finish()`. Missing: the log4j shutdown hook (Fabric keeps log4j's own), the early loading screen, `LanguageHook`, `setupModResourcePacks` (step 8), the client network registry lock (step 7), update checks, the loading-warnings screen and FML's fatal error window.
 
@@ -285,8 +370,28 @@ Client (Xvfb): the same order, with `[fabricprobe]` on the Render thread inside 
 ```
 The bake comes from Fabric API's freeze, between Fabric's mod init and common setup. Client (Xvfb): `metadata` 47, `lifecycle` 12 and `registries` 45 pass. The only new warnings are the missing model and sound for `registries:probe_block`/`probe_sound`: the testmod ships no assets, and NeoForge mods' resources aren't mounted yet (Known gap 7). **Registry sync, end to end** (client joining the dedicated server, §3): the client connects, and its bake callback runs again during the join (`baked, 2 time(s); ids [circle=0, square=1]`). That's Fabric API's registry sync remapping the NeoForge custom registry, with `MappedRegistryMixin` running NeoForge's clear and bake callbacks on the remap. The server logs the player joining, and nothing disconnects.
 
+**Verified step 4a output.** Dedicated server with all testmods (`events`, `registries`, `lifecycle`, `hello`, `metadata`, `fabricprobe`), on the existing dev world and on a freshly generated one:
+```
+[Server thread] (ServerEvents) [events] server event order: [commands, config, aboutToStart, load:overworld, spawn,
+    load:the_nether, load:the_end, save:overworld, save:the_nether, save:the_end, starting, started, tick, stopping,
+    shuttingDown, save:overworld, save:the_nether, save:the_end, unload:overworld, unload:the_nether, unload:the_end, stopped]
+[Server thread] (Checks) [events] all 30 server checks passed
+[Server thread] (Checks) [events] all 1 server player checks passed      (with a client joined)
+[Render thread] (Checks) [events] all 5 client checks passed             (client joined to the dev server, §3)
+```
+`spawn` (CreateSpawnPosition) appears only for a new world. The other testmods still pass. The client run used the script described in §3 (start the server, wait for "Done (", join with `--quickPlayMultiplayer`, wait for the client summary, kill the client JVM, send `stop` once the server logs "left the game"; also send `stop` if the client dies first, or the server waits five minutes for a player who never comes).
+
+**Verified step 4c so far** (client joined to the dev server, all testmods): server `[metadata] all 47`, `[lifecycle] all 11`, `[registries] all 45` + `4 world checks`, `[events] all 56 server checks passed`, `all 25 server player checks passed`; client `[metadata] all 47`, `[lifecycle] all 12`, `[registries] all 45`, `[events] all 16 client checks passed`.
+
+**Verified step 4b output** (client joined to the dev server):
+```
+[Render thread] (Checks) [events] all 15 client checks passed
+[Server thread] (Checks) [events] all 30 server checks passed
+[Server thread] (Checks) [events] all 20 server player checks passed
+```
+
 ### Known gaps (updated after step 3)
-1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). Since step 2, COMMON and CLIENT configs load at NeoForge's point in `begin` (the `lifecycle` testmod checks this with its own minimal `IConfigSpec`). Still missing: NeoForge's `ModConfigSpec`, and SERVER configs per world (step 6).
+1. ~~`ModContainer(String)`~~ **Fixed.** `ModContainer` is verbatim, including `registerConfig`, which goes to FML's `ConfigTracker` (ported verbatim). Since step 2, COMMON and CLIENT configs load at NeoForge's point in `begin` (the `lifecycle` testmod checks this with its own minimal `IConfigSpec`). Since step 4a, SERVER configs load at server about to start and unload after server stopped (`ServerLifecycleHooks`; the `events` testmod checks it). Still missing: NeoForge's `ModConfigSpec` and config sync to clients (step 6).
 2. ~~Errors wrapped in `RuntimeException`~~ **Fixed:** `ModLoadingException`/`ModLoadingIssue` and FML's translations, all verbatim.
 3. ~~`DeferredWorkQueue` without active container~~ **Fixed** (verbatim).
 4. ~~Lifecycle timing~~ **Fixed in step 2:** NeoForge's full sequence at NeoForge's hook points (see "How mods load" above). Registry initialization is real since step 3. Still placeholders: most of "Registration events" (steps 4, 5 and 9) and the network registry locks (step 7).
@@ -297,7 +402,7 @@ The bake comes from Fabric API's freeze, between Fabric's mod init and common se
    - `enumExtensions` (FML's `RuntimeEnumExtender`; `EnumProxy` is used by 3 of the test jars).
 6. **No transformation or cache yet.** Jars are loaded as-is. The `transformer`, `cli` and `upgrade-1.21.1` subprojects don't exist yet.
 7. **Fabric doesn't know about NeoForge mods.** They aren't Fabric mods, so they're missing from `FabricLoader.getAllMods()`, ModMenu and so on, and their jar resources aren't mounted as resource or data packs. That's needed as soon as a mod ships assets or data.
-8. ~~No `IBindingsProvider`~~ **Fixed in step 2:** `NeoForge.EVENT_BUS`, `NeoForgeBindings` and the services file, all verbatim. `@EventBusSubscriber` methods for game-bus events register, and the bus starts at the end of `begin`. Layer A doesn't post any game events yet; that's step 4.
+8. ~~No `IBindingsProvider`~~ **Fixed in step 2:** `NeoForge.EVENT_BUS`, `NeoForgeBindings` and the services file, all verbatim. `@EventBusSubscriber` methods for game-bus events register, and the bus starts at the end of `begin`. Step 4 posts game events (4a: server lifecycle, commands, ticks, levels; see §8 for what's left).
 9. **Crash reports.** `CrashReportCallables` are collected (ModList registers "Mod List"), but nothing writes them into Minecraft's crash reports. NeoForge's `CrashReportExtender` (including the mod loading crash dump the server writes on errors) isn't ported.
 10. **ModList lists only NeoForge mods plus `minecraft` and `neoforge`**, by design. If a NeoForge mod saw a Fabric mod's id it would enable integration code that expects the NeoForge build of that mod. Revisit if a specific integration needs it.
 11. ~~Only the dedicated server has run the loader~~ **Fixed in step 2:** the client runs under Xvfb (§3).
@@ -364,6 +469,22 @@ The bake comes from Fabric API's freeze, between Fabric's mod init and common se
   - **Item components are bound when datapacks load** (`ReloadableServerResources`; on the client in `RegistryDataCollector`). Before that, `new ItemStack(item)` throws "Components not bound yet", on NeoForge too, so stacks can't be made in setup events.
   - NeoForge's `injected-interfaces.json` (also in its universal jar) names two classes 26.2 doesn't have: `DeadBushBlock` (now `DryVegetationBlock`) and `IntrinsicHolderTagsProvider$IntrinsicTagAppender`.
   - Fabric's `PoiHelper` registers through vanilla's `PoiTypes.register`, which maps the block states itself after `Registry.register`. NeoForge maps them in a registry callback, so the two together map them twice (`PoiTypesMixin` skips states already mapped to the same type).
+- **Learned in step 4 (events):**
+  - **javac doesn't find abstract methods of an injected interface on a concrete class.** `Resolve.findMethod` skips superinterfaces' abstract methods when the receiver's class is concrete (it expects the class to implement them) and only searches interfaces that declare a default method. So an interface injected into a concrete vanilla class must give its methods default bodies (as `IdentifierExtension` and `WeightedListBuilderExtension` do); a mixin can supply the state through a second interface (`WeightedListBuilderExtension.Entries`). Abstract methods work only on interfaces like `Registry`.
+  - **`MinecraftServer.runServer`'s bytecode:** the outer try ends right before the inlined finally block (`stopped = true; stopServer(); ... onServerExit()`), which javac copies three times (normal exit, catch, exception path), each with its own nested try. `@At(value = "FIELD", target = "...stopped:Z", opcode = PUTFIELD, ordinal = 0)` is the normal exit of the tick loop; `@At(value = "INVOKE", target = "...onServerExit()V")` without an ordinal hits every copy.
+  - **`ClientTickEvent.Post` can fire without a `Pre`** on the tick where the game finishes loading: `LoadingOverlay.tick()` runs inside `Minecraft.tick()` and sets `gameLoadFinished`, which both of NeoForge's tick hooks check. NeoForge behaves the same.
+  - **Commands are built when the server's resources load**, before the server object exists (dedicated: in `Main`, after `ServerModLoader.load()`; integrated: when the world opens), so `RegisterCommandsEvent` comes before `ServerAboutToStartEvent`. It fires again on `/reload`.
+  - 26.2 has no spawn chunks to keep entities ticking on an empty server (no spawn chunk radius game rule); testmods force-load a chunk (`ServerLevel.setChunkForced`) and load it with `getChunk`. Entity type constants moved to `EntityTypes`. `net.minecraft.util.TriState` is vanilla in 26.2 (NeoForge's interaction events use it).
+  - Fabric API fires its own lifecycle events at nearby points: `SERVER_STARTING` before `initServer`, `SERVER_STARTED` after the status is built (after NeoForge's started), `SERVER_STOPPING`/`STOPPED` at the head and tail of `stopServer`, server ticks before `tickChildren` and at the tail, `ServerWorldEvents.LOAD` on the `Map.put` in `createLevels`, and `CommandRegistrationCallback` at the same `setConsumer` call as `RegisterCommandsEvent`. They coexist with ours; none of them carries the `BooleanSupplier` NeoForge's tick events need.
+  - In 26.2 NeoForge's block break event is `level.block.BreakBlockEvent` (1.21.1: `BlockEvent.BreakEvent`, a Layer B rename), fired by `CommonHooks.fireBlockBreak`. 26.2 also merged `EntityInteractSpecific` into `EntityInteract` (with a location), as vanilla merged `interactAt` into `interactOn`.
+  - NeoForge's patches add methods to vanilla classes that its own events and mods call, beyond the extension interfaces: `TriState.isTrue/isDefault/isFalse`, `WeightedList.Builder.add/addAll/remove/removeIf/getList`. Look for `// Neo:` helper methods in a class's patch when a ported file doesn't compile.
+  - **`@Shadow` only finds members declared on the target class**, neither a superclass's field (e.g. `ClientPacketListener`'s `minecraft` lives in `ClientCommonPacketListenerImpl`; `invulnerableTime` lives in `Entity`) nor an inherited method (`Player` doesn't declare `getDamageAfterArmorAbsorb`). The mixin fails to apply at class load, which crashes the game (on the client, Fabric's networking init). Use the member through a cast when it's public, `Minecraft.getInstance()`, or an interface that the superclass's mixin implements (`LivingEntityDamageContainers`).
+  - **Synthetic lambdas are stable targets in the unobfuscated jar** (`lambda$startDestroyBlock$1`, `lambda$useItem$0`); list them with `javap -p`. The numbering follows the order of lambdas in the method, so recheck after a Minecraft update.
+  - **`@ModifyVariable(at = @At("STORE"), ordinal = n)`** counts locals of that type in scope just after the store, so a boolean declared right after another is ordinal 1. The 26.2 jar keeps its LocalVariableTable (names and types), which `@Local` and these ordinals rely on.
+  - Calling `PlayerList.respawn` directly, as the testmod does, leaves `connection.player` on the old player; vanilla's packet handler assigns respawn's result to it.
+  - **`Entity.equals`/`hashCode` compare entity ids**, and a respawned `ServerPlayer` takes over the old player's id (`setId`), so maps keyed by entity must be identity maps.
+  - **A chunk force-loaded this tick isn't visible to entity lookups yet**: `getChunk` brings it to FULL at once, but the entity manager learns the chunk's status a tick later, so `ServerLevel.getEntity(uuid)` (the visible entity storage) can't see entities added there in the same tick.
+  - Server-side interaction methods (`ServerPlayerGameMode.handleBlockBreakAction`/`destroyBlock`/`useItemOn`/`useItem`, `Player.interactOn`/`attack`) can be called directly for a connected player; spawn protection only applies in the network handler and in `handleBlockBreakAction` after NeoForge's hook.
 
 ---
 
@@ -431,6 +552,10 @@ The vanilla gap: 1,441 of 8,269 classes in 1.21.1 are gone or renamed in 26.2, w
 4. `network.registration` / `.handling` / `.event` 9 each, `common.world` 9, `capabilities` 9, `neoforgespi.language` 8
 5. `items` 8, `event.tick` 8, `common.extensions` 8, `fml.config` 8, then fluids, `entity.living`, `client.model.data`, `client.extensions.common`, `neoforgespi.locating`, `server`, `data.event`, `client.model.generators`, `fml.loading.moddiscovery`, `fml.event.config`
 
+**NeoForge events and hooks the corpus uses** (constant-pool scan of the 14 in-scope jars, nested jars included; number of jars, 1.21.1 names):
+- Game bus: `PlayerInteractEvent` 10 (`RightClickBlock` 9, `EntityInteract` 6, `LeftClickBlock` 5, `RightClickItem` 4, `LeftClickEmpty` 3, `EntityInteractSpecific` 2, `RightClickEmpty` 1), `AddReloadListenerEvent` 9, `ItemTooltipEvent` 9, `BlockEvent` 9 (`BreakEvent` 5, `EntityPlaceEvent` 4, `NeighborNotifyEvent` 3, `BlockToolModificationEvent` 3, `FarmlandTrampleEvent` 2), `RegisterCommandsEvent` 8, `EntityJoinLevelEvent` 6, `ServerAboutToStartEvent` 6, `ServerTickEvent` 6, `PlayerLoggedInEvent` 5, `ServerStoppingEvent` 5, `LevelTickEvent` 5, `LevelEvent.Unload` 5, `VillagerTradesEvent` 5, then 4 each: `LivingChangeTargetEvent`, `LivingDeathEvent`, `LivingIncomingDamageEvent`, `PlayerLoggedOutEvent`, `ChunkEvent`, `LevelEvent.Load`, `ServerStoppedEvent`, `EntityTickEvent`, `WandererTradesEvent`, `BuildCreativeModeTabContentsEvent`; 3: `EntityLeaveLevelEvent`, `FinalizeSpawnEvent`, `ChunkDataEvent`, `ServerStartingEvent`, `PlayerTickEvent`, `LootTableLoadEvent`, `OnDatapackSyncEvent`, `AddPackFindersEvent`.
+- Hook methods called directly: `ServerLifecycleHooks.getCurrentServer()` 6, `CommonHooks.canCropGrow`/`fireCropGrowPost` 3, `EventHooks.onNeighborNotify` 2, then single uses (`CommonHooks.fireBlockBreak`, `onRightClickBlock`, `onLeftClickBlock`, `onInteractEntity`, `onPlayerAttackTarget`, `EventHooks.onBlockPlace`, `getBreakSpeed`, `doPlayerHarvestCheck`, ...).
+
 Reproduce the measurement (read-only). Set `C=~/.cache/mc-src/jars`, then:
 ```bash
 m26=$(unzip -Z1 $C/26.2-client.jar '*.class' | sed 's/\.class$//' | sort -u)
@@ -450,14 +575,16 @@ Work in this order. Each step gets a **genuine NeoForge 26.2 testmod** under `te
 1. ✅ **FML metadata and context** (done 2026-10-28; see §4 and Known gaps). Original task: port `neoforgespi` `IModInfo`/`IModFileInfo`/`IModFile` (only what mods use), `ModList` (`get()`, `isLoaded`, `getModContainerById`, `getModFileById`, `getMods`), `ModLoadingContext`, `FMLEnvironment`/`FMLLoader` (`getDist`, `isProduction`, `getCurrent()` as in 11.x), `FMLPaths` (`CONFIGDIR`, `GAMEDIR`, `MODSDIR`), `ModLoadingException`/`ModLoadingIssue`, and `InterModComms` with the IMC events. Restore the real `ModContainer` signatures (Shortcut 1). Make `NeoModDiscovery` read the full TOML.
 2. ✅ **Lifecycle ordering** (done 2026-10-28; see "How mods load" in §4). It went in through mixins at NeoForge's call sites rather than Fabric entrypoints (the decision in §1), so `loader` lost its `main` entrypoint. Ported NeoForge's `CommonModLoader`/`ServerModLoader`/`ClientModLoader`, plus `NeoForge.EVENT_BUS` and the bindings provider (Known gap 8). Neoforge-api got a client source set. Testmods `lifecycle` and `fabricprobe`. The client runs under Xvfb.
 3. ✅ **Registries** (done 2026-10-28; see §4 "Where Layer A deviates", Known gap 15 and the facts in §5). Ported the registries package (deferred registers and holders, the registry events, `RegistryBuilder`, callbacks, data map types, holder sets, datapack registries) with NeoForge's `MappedRegistry`/`Holder`/`HolderSet`/`Registry` patches as mixins plus a class tweaker. Registries stay open until Fabric API freezes them, sync goes through Fabric's registry sync (checked with a client joining the server), and datapack registries go through Fabric's `DynamicRegistries`. The `neoforge` system mod became a real `javafml` mod (`NeoForgeMod`). New testmod `registries`; `fabricprobe` checks from Fabric's side; testmods compile with NeoForge's extension interfaces (generated class tweaker).
-4. **Game bus and common events.** `NeoForge.EVENT_BUS` exists since step 2 and starts at the end of `begin`. Implement in this order:
-   - Server lifecycle events: `ServerStarting`, `ServerStarted`, `ServerStopping`, `RegisterCommandsEvent`.
-   - Tick events, which map onto Fabric's lifecycle callbacks.
-   - Level load/unload.
-   - Player events: login/logout, clone, interact, break.
-   - Living and entity events, through our own mixins where Fabric has no event.
-
-   For each, read the NeoForge patch that fires it (`NeoForge-26.2/patches/...`) and write the equivalent mixin, unless Fabric API already has the hook.
+4. **Game bus and common events.** `NeoForge.EVENT_BUS` exists since step 2 and starts at the end of `begin`. For each event, read the NeoForge patch that fires it (`NeoForge-26.2/patches/...`) and write the equivalent mixin at the same site (Fabric API's events don't carry what NeoForge's need, e.g. the tick `BooleanSupplier`, and fire at slightly different points). Port the hook method into the partial `EventHooks`/`CommonHooks`/`ClientHooks` verbatim. Corpus usage is listed in §7; the top ones are `PlayerInteractEvent.RightClickBlock` (9), `RegisterCommandsEvent` (8), `EntityJoinLevelEvent` (6), `PlayerInteractEvent.EntityInteract` (6), server tick (6), login (5), break (5), left click block (5).
+   - ✅ **4a** (done 2026-10-28): server lifecycle (about to start, starting, started, stopping, stopped; dedicated and integrated), `ServerLifecycleHooks.getCurrentServer` (6 jars), SERVER configs per world, `RegisterCommandsEvent`, `CommandEvent`, `GameShuttingDownEvent`, server/level/entity/player/client ticks, level load/unload/save and `CreateSpawnPosition`, plus NeoForge's `WeightedList.Builder` patch (used by `LevelEvent.PotentialSpawns`). Testmod `events`.
+   - ✅ **4b** (done 2026-10-28): player and interaction events. Server: login, logout, `PlayerRespawnPositionEvent`, respawn, clone, `EntityTravelToDimensionEvent` (players), changed dimension, `PlayerInteractEvent` (left click block, right click block and item, entity interaction) with cancellation and use-block/use-item results, `BreakBlockEvent`, `AttackEntityEvent`. Client: the same interactions in `MultiPlayerGameMode`, left click hold, empty clicks, `ClientPlayerNetworkEvent` (logging in and out, clone). Plus `BlockEvent` (+`ItemAbility`, `ItemAbilities`, `BlockSnapshot`) and NeoForge's `TriState` helpers. Left for later (see the deviations in §4): the extension-method parts (step 5), `PlayerDestroyItemEvent`, and block placement (`EntityPlaceEvent`, 4 jars), which needs NeoForge's block snapshot capture in `Level` and `ItemStack.useOn` (`CommonHooks.onPlaceItemIntoWorld`); probably with step 5. Not started either: the rarer player events (`BreakSpeed`, `HarvestCheck`, `StartTracking`, `ItemCrafted`/`ItemSmelted`, `PlayerContainerEvent`, sleeping, XP, ...).
+   - **4c, in progress:** living and entity events.
+     - ✅ `EntityJoinLevelEvent` (server: every add through `PersistentEntitySectionManager`, players at `ServerLevel.addPlayer` with NeoForge's `addNewEntityWithoutEvent`; client: `ClientLevel.addEntity`), `EntityLeaveLevelEvent` (both levels' `EntityCallbacks.onTrackingEnd`), `LivingDeathEvent` (`LivingEntity.die`, `ServerPlayer.die`), `LivingDropsEvent` (NeoForge's drop capture: `captureDrops` on `Entity`, `spawnAtLocation` adds to it, `dropAllDeathLoot` fires the event).
+     - ✅ The damage pipeline: `EntityInvulnerabilityCheckEvent` (wrapping `Entity.isInvulnerableToBase`), `LivingIncomingDamageEvent`, `LivingDamageEvent.Pre`/`Post`, with `common/damagesource` (`DamageContainer`, `IReductionFunction`). `hurtServer` keeps vanilla's code with NeoForge's additions injected (container pushed and incoming event at the `isSleeping()` call, the container as the source of the damage amount, invulnerability-branch setup, invulnerability ticks from the container, side effects from the container, `Post` at the end); a `@WrapMethod` pops whatever a call pushed, whichever way it returns (Fabric API's `ALLOW_DAMAGE` cancels at the same `isSleeping()` call). `actuallyHurt` in `LivingEntity` and in `Player` are `@Overwrite`s with NeoForge's patched bodies, so NeoForge mods' mixins into them find NeoForge's shape. `getDamageAfterMagicAbsorb` records the mob effect and enchantment reductions. The stack is a real protected field named `damageContainers` on `LivingEntity` (NeoForge's name). Deviations: in the normal branch vanilla sets `lastHurt` and the invulnerability ticks before `actuallyHurt` (NeoForge after); `actuallyHurt` and the magic-absorb reductions tolerate an empty stack (NeoForge throws `EmptyStackException`). Not yet: `onDamageTaken` (step 5), the shield event (`LivingShieldBlockEvent` is ported, but its hook in `applyItemBlocking` needs NeoForge's six-argument `BlocksAttacks.hurtBlockingItem`), the armor durability event (`ArmorHurtEvent`, `doHurtEquipment`), `LivingHealEvent`.
+     - ✅ `LivingChangeTargetEvent` (`Mob.setTarget`, and `StartAttacking`'s lambda `lambda$create$3` for brain-driven mobs), `LivingKnockBackEvent` (`@WrapMethod` on the six-argument `knockback`), `LivingEquipmentChangeEvent` (`collectEquipmentChanges`), `LivingEntityUseItemEvent` (start before `useItem` is set, with NeoForge's early return on a negative duration; tick through an `@Overwrite` of `updateUsingItem`, NeoForge's version; finish around `finishUsingItem`; stop as a condition on `releaseUsing`).
+     - **Next:** `ItemEntityPickupEvent` (2; `ItemEntity.playerTouch`, which NeoForge rewrites around the pre event's result), chunk events (`ChunkEvent.Load`/`Unload` 4, `ChunkDataEvent.Load`/`Save` 3). Sites: `ChunkMap` (unload before `level.unload`, data load after `read`, data save after `SerializableChunkData.copyOf`), `ChunkStatusTasks` (load, at the end of the full-chunk task), `ClientChunkCache` (load after `onChunkLoaded`, unload before `drop`). `ChunkEvent.Load` on the server needs NeoForge's deadlock guard with it: a public `currentlyLoading` field on `GenerationChunkHolder`, set around `runPostLoad` and around the block entity registration plus the event in `ChunkStatusTasks`, and returned early by `ServerChunkCache`'s `getChunk` paths, so a listener asking for the loading chunk doesn't wait on its own future. The same patches add `CommonHooks.onChunkUnload` (POI) and `ChunkTicketLevelUpdatedEvent`/`ChunkWatchEvent` hooks in `ChunkMap`.
+     - Also next: `EntityTravelToDimensionEvent` for non-player entities (`Entity.teleport`), `PlayerDestroyItemEvent` (2), `LivingHealEvent`, `LivingFallEvent`, `LivingEvent.LivingJumpEvent`, then the rarer ones by corpus count (§7).
+     - Waiting for the entity extension (step 5): `onAddedToLevel`/`onRemovedFromLevel`/`isAddedToLevel` around these events, the entering-section hook, multipart entities.
 5. **Extension interfaces and ATs.** The mechanism exists since step 3: `neoforge-api`'s class tweaker (applied by Loom and, at run time, by Fabric Loader) and the `patches/` package.
    - Add the rest of NeoForge's `META-INF/injected-interfaces.json` to the class tweaker as `inject-interface` lines, porting each `I*Extension` interface (most methods are defaults; abstract ones need a mixin implementing them, as `MappedRegistryMixin` does for `IRegistryExtension`). Skip the two stale targets (§5).
    - Convert NeoForge's AT files (`accesstransformer.cfg`, `accesstransformergenerated.cfg`) into class tweaker lines, for `neoforge-api` and for the testmods' compile class tweaker (Known gap 16).

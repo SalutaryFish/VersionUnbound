@@ -12,6 +12,9 @@ inject-interface	net/minecraft/core/HolderSet	net/neoforged/neoforge/common/exte
 inject-interface	net/minecraft/resources/Identifier	net/salutaryfish/versionunbound/neoforge/patches/IdentifierExtension
 inject-interface	net/minecraft/core/HolderLookup$RegistryLookup	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension<TT;>
 inject-interface	net/minecraft/core/HolderLookup$RegistryLookup$Delegate	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension$Delegate<TT;>
+inject-interface	net/minecraft/util/TriState	net/salutaryfish/versionunbound/neoforge/patches/TriStateExtension
+inject-interface	net/minecraft/world/level/entity/PersistentEntitySectionManager	net/salutaryfish/versionunbound/neoforge/patches/PersistentEntitySectionManagerExtension<TT;>
+inject-interface	net/minecraft/util/random/WeightedList$Builder	net/salutaryfish/versionunbound/neoforge/patches/WeightedListBuilderExtension<TE;>
 
 # NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
 # NeoForge's patch replaces with GameData's).

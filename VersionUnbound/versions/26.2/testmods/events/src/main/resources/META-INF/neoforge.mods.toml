@@ -1,0 +1,23 @@
+modLoader = "javafml"
+# Checked against the version of the built-in javafml loader (FML 11.0.16).
+loaderVersion = "[11,)"
+license = "LGPL-2.1-only"
+
+[[mods]]
+modId = "events"
+version = "0.1.0"
+displayName = "VersionUnbound Events"
+description = "Checks the events NeoForge fires on its game bus: server lifecycle, commands, ticks, levels, players and interactions."
+
+[[mixins]]
+config = "events.mixins.json"
+
+[[dependencies.events]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.2,)"
+
+[[dependencies.events]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.2.0,)"
