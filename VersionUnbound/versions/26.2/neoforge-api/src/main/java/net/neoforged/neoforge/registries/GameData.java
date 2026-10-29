@@ -24,7 +24,9 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.fml.ModLoader;
 import net.neoforged.fml.loading.progress.StartupNotificationManager;
+import net.neoforged.neoforge.common.CommonHooks;
 import net.salutaryfish.versionunbound.neoforge.mixin.registries.BuiltInRegistriesAccessor;
+import net.salutaryfish.versionunbound.neoforge.patches.SpawnPlacementsPatch;
 import org.jetbrains.annotations.ApiStatus;
 import org.slf4j.Logger;
 import org.slf4j.Marker;
@@ -86,10 +88,9 @@ public class GameData {
             // VersionUnbound: no rollback to the vanilla snapshot (see RegistryManager); the error stops the game.
             throw aggregate;
         } else {
-            // VersionUnbound: each of these arrives with its feature: entity attributes and spawn placements with the game
-            // events (Phase 2 step 4), the rest with the extension interfaces they rely on (step 5).
-            // CommonHooks.modifyAttributes();
-            // SpawnPlacements.fireSpawnPlacementEvent();
+            CommonHooks.modifyAttributes();
+            SpawnPlacementsPatch.fireSpawnPlacementEvent(); // VersionUnbound: NeoForge adds it to SpawnPlacements
+            // VersionUnbound: these arrive with the extension interfaces they rely on (Phase 2 step 5).
             // ModLoader.postEvent(new BlockEntityTypeAddBlocksEvent());
             // CreativeModeTabRegistry.sortTabs();
             // GameRuleCategory.registerModdedCategories();

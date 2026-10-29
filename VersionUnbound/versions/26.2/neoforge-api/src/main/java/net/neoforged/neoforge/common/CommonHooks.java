@@ -8,6 +8,9 @@ package net.neoforged.neoforge.common;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
@@ -18,7 +21,10 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
+import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -28,7 +34,10 @@ import net.minecraft.world.level.block.GameMasterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.fml.ModLoader;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
+import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
+import net.neoforged.neoforge.event.entity.EntityAttributeModificationEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
@@ -44,6 +53,7 @@ import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
+import net.salutaryfish.versionunbound.neoforge.patches.AttributeSupplierBuilderExtension;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import org.jspecify.annotations.Nullable;
 
@@ -241,5 +251,29 @@ public class CommonHooks {
 
     public static void onEmptyLeftClick(Player player) {
         NeoForge.EVENT_BUS.post(new PlayerInteractEvent.LeftClickEmpty(player));
+    }
+
+    private static final Map<EntityType<? extends LivingEntity>, AttributeSupplier> FORGE_ATTRIBUTES = new HashMap<>();
+
+    /** FOR INTERNAL USE ONLY, DO NOT CALL DIRECTLY */
+    @Deprecated
+    public static Map<EntityType<? extends LivingEntity>, AttributeSupplier> getAttributesView() {
+        return Collections.unmodifiableMap(FORGE_ATTRIBUTES);
+    }
+
+    /** FOR INTERNAL USE ONLY, DO NOT CALL DIRECTLY */
+    @Deprecated
+    public static void modifyAttributes() {
+        ModLoader.postEvent(new EntityAttributeCreationEvent(FORGE_ATTRIBUTES));
+        Map<EntityType<? extends LivingEntity>, AttributeSupplier.Builder> finalMap = new HashMap<>();
+        ModLoader.postEvent(new EntityAttributeModificationEvent(finalMap));
+
+        finalMap.forEach((k, v) -> {
+            AttributeSupplier supplier = DefaultAttributes.getSupplier(k);
+            // VersionUnbound: instead of NeoForge's Builder(AttributeSupplier) constructor (see AttributeSupplierBuilderExtension).
+            AttributeSupplier.Builder newBuilder = supplier != null ? AttributeSupplierBuilderExtension.copyOf(supplier) : new AttributeSupplier.Builder();
+            newBuilder.combine(v);
+            FORGE_ATTRIBUTES.put(k, newBuilder.build());
+        });
     }
 }

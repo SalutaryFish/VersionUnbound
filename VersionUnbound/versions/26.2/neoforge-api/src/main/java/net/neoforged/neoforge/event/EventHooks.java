@@ -10,15 +10,20 @@ import java.util.function.BooleanSupplier;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -26,6 +31,7 @@ import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnder
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
@@ -36,6 +42,7 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
+import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -56,6 +63,17 @@ import org.jspecify.annotations.Nullable;
 public class EventHooks {
     public static void onPlayerDestroyItem(Player player, ItemStack stack, @Nullable InteractionHand hand) {
         NeoForge.EVENT_BUS.post(new PlayerDestroyItemEvent(player, stack, hand));
+    }
+
+    /**
+     * Internal, should only be called via {@link SpawnPlacements#checkSpawnRules}.
+     * 
+     * @see SpawnPlacementCheck
+     */
+    @ApiStatus.Internal
+    public static boolean checkSpawnPlacements(EntityType<?> entityType, ServerLevelAccessor level, EntitySpawnReason spawnType, BlockPos pos, RandomSource random, boolean defaultResult) {
+        var event = new SpawnPlacementCheck(entityType, level, spawnType, pos, random, defaultResult);
+        return NeoForge.EVENT_BUS.post(event).getPlacementCheckResult();
     }
 
     public static int onItemUseStart(LivingEntity entity, ItemStack item, InteractionHand hand, int duration) {

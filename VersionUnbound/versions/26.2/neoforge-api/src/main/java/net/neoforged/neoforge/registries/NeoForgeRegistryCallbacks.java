@@ -10,15 +10,26 @@ import java.util.Map;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.registries.callback.AddCallback;
+import net.neoforged.neoforge.registries.callback.BakeCallback;
 import net.neoforged.neoforge.registries.callback.ClearCallback;
 
 class NeoForgeRegistryCallbacks {
-    // VersionUnbound: BlockCallbacks, ItemCallbacks and AttributeCallbacks aren't ported. Fabric API already does their work
-    // for every registration: block state ids, the block to item map, shape caches and the debug world's state list.
-    // Vanilla's maps stay in use (see GameData), and attribute validation comes with entity attributes (Phase 2 step 4).
+    // VersionUnbound: BlockCallbacks and ItemCallbacks aren't ported. Fabric API already does their work for every
+    // registration: block state ids, the block to item map, shape caches and the debug world's state list. Vanilla's maps
+    // stay in use (see GameData).
+
+    static class AttributeCallbacks implements BakeCallback<Attribute> {
+        static final AttributeCallbacks INSTANCE = new AttributeCallbacks();
+
+        public void onBake(Registry<Attribute> registry) {
+            DefaultAttributes.validate();
+        }
+    }
 
     static class PoiTypeCallbacks implements AddCallback<PoiType>, ClearCallback<PoiType> {
         static final PoiTypeCallbacks INSTANCE = new PoiTypeCallbacks();

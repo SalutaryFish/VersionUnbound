@@ -26,6 +26,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.entity.ai.village.poi.PoiTypes;
+import net.minecraft.world.entity.animal.pig.Pig;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
@@ -36,7 +37,9 @@ import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.fml.event.lifecycle.FMLLoadCompleteEvent;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IHolderSetExtension;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.registries.DataPackRegistryEvent;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredHolder;
@@ -58,8 +61,9 @@ import org.slf4j.Logger;
 /**
  * Checks NeoForge's registry API: deferred registers and holders, the registry events and their order, custom
  * registries with callbacks, aliases, sync and id limits, NeoForge's own registries, data map types and datapack
- * registries. Registration checks summarize at load complete; datapack registries are checked when a world loads (see
- * the mixin), on servers only.
+ * registries, and the entity events that follow registration ({@link EntityChecks}). Registration checks summarize at
+ * load complete; world checks run on servers only: datapack registries when a world loads (see the mixin), entities once
+ * the server has started, where the world checks summarize.
  *
  * <p>Calls such as {@code registry.addAlias(...)} compile to the same bytecode as in a mod built with NeoForge's
  * toolchain (see the testmod class tweaker).
@@ -121,6 +125,7 @@ public class RegistriesMod {
 
     private static final DeferredRegister.Entities ENTITIES = DeferredRegister.createEntities(MOD_ID);
     static final DeferredHolder<EntityType<?>, EntityType<ItemEntity>> PROBE_ENTITY = ENTITIES.registerEntityType("probe_entity", ItemEntity::new, MobCategory.MISC);
+    static final DeferredHolder<EntityType<?>, EntityType<Pig>> PROBE_MOB = ENTITIES.registerEntityType("probe_mob", Pig::new, MobCategory.CREATURE);
 
     private static final DeferredRegister<PoiType> POI_TYPES = DeferredRegister.create(Registries.POINT_OF_INTEREST_TYPE, MOD_ID);
     static final DeferredHolder<PoiType, PoiType> PROBE_POI = POI_TYPES.register("probe_poi",
@@ -129,6 +134,7 @@ public class RegistriesMod {
     static final DataMapType<Item, Integer> WEIGHT = DataMapType.builder(id("weight"), Registries.ITEM, Codec.INT).build();
 
     private static Registry<Color> colorRegistry;
+    private static Checks worldChecks;
 
     public RegistriesMod(IEventBus modBus) {
         CHECKS.check("DeferredHolder unbound before its registry's RegisterEvent", !PROBE_ITEM.isBound() && PROBE_ITEM.asOptional().isEmpty());
@@ -155,6 +161,11 @@ public class RegistriesMod {
         });
         modBus.addListener(FMLCommonSetupEvent.class, this::commonSetup);
         modBus.addListener(FMLLoadCompleteEvent.class, this::loadComplete);
+        EntityChecks.register(modBus);
+        NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
+            EntityChecks.checkWorld(worldChecks, event.getServer().overworld());
+            worldChecks.summarize();
+        });
     }
 
     static Identifier id(String path) {
@@ -284,11 +295,13 @@ public class RegistriesMod {
         CHECKS.check("a synced custom registry is synced and modded for Fabric", Boolean.getBoolean("versionunbound.testprobe.shapesSyncAttributes"));
         CHECKS.check("Fabric's point of interest helper still works", Boolean.getBoolean("versionunbound.testprobe.fabricPoiRegistered")
                 && PoiTypes.forState(Blocks.DRIED_KELP_BLOCK.defaultBlockState()).isPresent());
+
+        EntityChecks.checkRegistration(CHECKS);
     }
 
-    /** Called by the mixin when a server is about to load its world. */
+    /** Called by the mixin when a server is about to load its world; the world checks summarize once it has started. */
     public static void checkWorld(MinecraftServer server) {
-        var checks = new Checks("world checks");
+        var checks = worldChecks = new Checks("world checks");
         checks.check("synced datapack registry loaded", server.registryAccess().lookup(SPELLS_KEY).isPresent());
         checks.check("datapack registry built with its RegistryBuilder options", () -> server.registryAccess().lookupOrThrow(RUNES_KEY).getMaxId() == 5);
         // Item components are bound once datapacks have loaded, so stacks can only be made from here on.
@@ -298,7 +311,6 @@ public class RegistriesMod {
             logs.addInvalidationListener(() -> {});
             return !logs.isImmediatelyResolvable();
         });
-        checks.summarize();
     }
 
     private void loadComplete(FMLLoadCompleteEvent event) {

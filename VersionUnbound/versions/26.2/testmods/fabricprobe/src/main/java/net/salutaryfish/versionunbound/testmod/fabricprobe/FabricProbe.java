@@ -3,12 +3,20 @@ package net.salutaryfish.versionunbound.testmod.fabricprobe;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
+import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.object.builder.v1.world.poi.PoiHelper;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
+import net.minecraft.world.entity.animal.pig.Pig;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
 import org.slf4j.Logger;
@@ -28,6 +36,7 @@ public class FabricProbe implements ModInitializer {
         System.setProperty(PREFIX + "fabricInitialized", "true");
         LOGGER.info("[fabricprobe] Fabric is initializing its mods");
         probeRegistries();
+        probeEntities();
     }
 
     private static void probeRegistries() {
@@ -52,5 +61,25 @@ public class FabricProbe implements ModInitializer {
         } catch (RuntimeException e) {
             LOGGER.error("[fabricprobe] could not register a point of interest type", e);
         }
+    }
+
+    /**
+     * Registers a mob with Fabric's default attribute registry, which writes into vanilla's table, next to NeoForge's
+     * attributes; and looks at the attributes the registries testmod's NeoForge events gave its mob and vanilla's zombie.
+     */
+    @SuppressWarnings("unchecked")
+    private static void probeEntities() {
+        var mobKey = ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath("versionunbound_fabricprobe", "probe_mob"));
+        try {
+            EntityType<Pig> mob = Registry.register(BuiltInRegistries.ENTITY_TYPE, mobKey, EntityType.Builder.of(Pig::new, MobCategory.CREATURE).build(mobKey));
+            FabricDefaultAttributeRegistry.register(mob, Pig.createAttributes());
+        } catch (RuntimeException e) {
+            LOGGER.error("[fabricprobe] could not register a mob", e);
+        }
+
+        var neoForgeMob = (EntityType<? extends LivingEntity>) BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.fromNamespaceAndPath("registries", "probe_mob"));
+        System.setProperty(PREFIX + "sawNeoForgeAttributes", String.valueOf(neoForgeMob != EntityTypes.PIG && DefaultAttributes.hasSupplier(neoForgeMob)
+                && DefaultAttributes.getSupplier(neoForgeMob).getBaseValue(Attributes.MAX_HEALTH) == 12.0
+                && DefaultAttributes.getSupplier(EntityTypes.ZOMBIE).hasAttribute(Attributes.LUCK)));
     }
 }

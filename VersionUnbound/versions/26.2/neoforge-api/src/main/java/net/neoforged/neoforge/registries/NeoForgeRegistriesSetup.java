@@ -83,10 +83,10 @@ public class NeoForgeRegistriesSetup {
             MappedRegistryExtension.of(registry).versionunbound$setSync(true); // VersionUnbound: see MappedRegistryExtension
         }
 
-        // VersionUnbound: Fabric API does the work of the block, item and attribute callbacks (see NeoForgeRegistryCallbacks).
+        // VersionUnbound: Fabric API does the work of the block and item callbacks (see NeoForgeRegistryCallbacks).
         // BuiltInRegistries.BLOCK.addCallback(NeoForgeRegistryCallbacks.BlockCallbacks.INSTANCE);
         // BuiltInRegistries.ITEM.addCallback(NeoForgeRegistryCallbacks.ItemCallbacks.INSTANCE);
-        // BuiltInRegistries.ATTRIBUTE.addCallback(NeoForgeRegistryCallbacks.AttributeCallbacks.INSTANCE);
+        BuiltInRegistries.ATTRIBUTE.addCallback(NeoForgeRegistryCallbacks.AttributeCallbacks.INSTANCE);
         BuiltInRegistries.POINT_OF_INTEREST_TYPE.addCallback(NeoForgeRegistryCallbacks.PoiTypeCallbacks.INSTANCE);
         // VersionUnbound: attachments come in Phase 2 step 9.
         // NeoForgeRegistries.ATTACHMENT_TYPES.addCallback(AttachmentSync.ATTACHMENT_TYPE_ADD_CALLBACK);
