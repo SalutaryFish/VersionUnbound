@@ -18,32 +18,40 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.BaseSpawner;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.SpawnData;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.HitResult;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.common.extensions.IOwnedSpawner;
 import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
+import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
+import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
@@ -76,6 +84,132 @@ public class EventHooks {
     public static boolean checkSpawnPlacements(EntityType<?> entityType, ServerLevelAccessor level, EntitySpawnReason spawnType, BlockPos pos, RandomSource random, boolean defaultResult) {
         var event = new SpawnPlacementCheck(entityType, level, spawnType, pos, random, defaultResult);
         return NeoForge.EVENT_BUS.post(event).getPlacementCheckResult();
+    }
+
+    /**
+     * Checks if the current position of the passed mob is valid for spawning, by firing {@link PositionCheck}.<br>
+     * The default check is to perform the logical and of {@link Mob#checkSpawnRules} and {@link Mob#checkSpawnObstruction}.<br>
+     * 
+     * @param mob       The mob being spawned.
+     * @param level     The level the mob will be added to, if successful.
+     * @param spawnType The spawn type of the spawn.
+     * @return True, if the position is valid, as determined by the contract of {@link PositionCheck}.
+     * @see PositionCheck
+     */
+    public static boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason spawnType) {
+        var event = new PositionCheck(mob, level, spawnType, null);
+        NeoForge.EVENT_BUS.post(event);
+        if (event.getResult() == PositionCheck.Result.DEFAULT) {
+            return mob.checkSpawnRules(level, spawnType) && mob.checkSpawnObstruction(level);
+        }
+        return event.getResult() == PositionCheck.Result.SUCCEED;
+    }
+
+    /**
+     * Specialized variant of {@link #checkSpawnPosition} for spawners, as they have slightly different checks, and pass through the {@link BaseSpawner} to the event.
+     * 
+     * @see #checkSpawnPosition(Mob, ServerLevelAccessor, EntitySpawnReason)
+     * @implNote See in-line comments about custom spawn rules.
+     */
+    public static boolean checkSpawnPositionSpawner(Mob mob, ServerLevelAccessor level, EntitySpawnReason spawnType, SpawnData spawnData, BaseSpawner spawner) {
+        var event = new PositionCheck(mob, level, spawnType, spawner);
+        NeoForge.EVENT_BUS.post(event);
+        if (event.getResult() == PositionCheck.Result.DEFAULT) {
+            // Spawners do not evaluate Mob#checkSpawnRules if any custom rules are present. This is despite the fact that these two methods do not check the same things.
+            return (spawnData.getCustomSpawnRules().isPresent() || mob.checkSpawnRules(level, spawnType)) && mob.checkSpawnObstruction(level);
+        }
+        return event.getResult() == PositionCheck.Result.SUCCEED;
+    }
+
+    /**
+     * Finalizes the spawn of a mob by firing the {@link FinalizeSpawnEvent} and calling {@link Mob#finalizeSpawn} with the result.
+     * <p>
+     * Mods should call this method in place of calling {@link Mob#finalizeSpawn}, unless calling super from within an override.
+     * Vanilla calls to {@link Mob#finalizeSpawn} are replaced with calls to this method via coremod, so calls to this method will not show in an IDE.
+     * <p>
+     * When interfacing with this event, write all code as normal, and replace the call to {@link Mob#finalizeSpawn} with a call to this method.<p>
+     * As an example, the following code block:
+     * <code>
+     * 
+     * <pre>
+     * var zombie = new Zombie(level);
+     * zombie.finalizeSpawn(level, difficulty, spawnType, spawnData);
+     * level.tryAddFreshEntityWithPassengers(zombie);
+     * if (zombie.isAddedToLevel()) {
+     *     // Do stuff with your new zombie
+     * }
+     * </pre>
+     * 
+     * </code>
+     * Would become:
+     * <code>
+     * 
+     * <pre>
+     * var zombie = new Zombie(level);
+     * EventHooks.finalizeMobSpawn(zombie, level, difficulty, spawnType, spawnData);
+     * level.tryAddFreshEntityWithPassengers(zombie);
+     * if (zombie.isAddedToLevel()) {
+     *     // Do stuff with your new zombie
+     * }
+     * </pre>
+     * 
+     * </code>
+     * The only code that changes is the {@link Mob#finalizeSpawn} call.
+     * 
+     * @param mob        The mob whose spawn is being finalized
+     * @param level      The level the mob will be spawned in
+     * @param difficulty The local difficulty at the position of the mob
+     * @param spawnType  The type of spawn that is occuring
+     * @param spawnData  Optional spawn data relevant to the mob being spawned
+     * @return The SpawnGroupData from the finalize, or null if it was canceled. The return value of this method has no bearing on if the entity will be spawned
+     * 
+     * @see FinalizeSpawnEvent
+     * @see Mob#finalizeSpawn(ServerLevelAccessor, DifficultyInstance, EntitySpawnReason, SpawnGroupData)
+     * 
+     * @apiNote Callers do not need to check if the entity's spawn was cancelled, as the spawn will be blocked by Forge.
+     * 
+     * @implNote Changes to the signature of this method must be reflected in the method redirector coremod.
+     */
+    @Nullable
+    @SuppressWarnings("deprecation") // Call to deprecated Mob#finalizeSpawn is expected.
+    public static SpawnGroupData finalizeMobSpawn(Mob mob, ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnType, @Nullable SpawnGroupData spawnData) {
+        var event = new FinalizeSpawnEvent(mob, level, mob.getX(), mob.getY(), mob.getZ(), difficulty, spawnType, spawnData, null);
+        NeoForge.EVENT_BUS.post(event);
+
+        if (!event.isCanceled()) {
+            return mob.finalizeSpawn(level, event.getDifficulty(), event.getSpawnType(), event.getSpawnData());
+        }
+
+        return null;
+    }
+
+    /**
+     * Finalizes the spawn of a mob by firing the {@link FinalizeSpawnEvent} and calling {@link Mob#finalizeSpawn} with the result.
+     * <p>
+     * This method is separate since mob spawners perform special finalizeSpawn handling when NBT data is present, but we still want to fire the event.
+     * <p>
+     * This overload is also the only way to pass through an {@link IOwnedSpawner} instance.
+     * 
+     * @param mob        The mob whose spawn is being finalized
+     * @param level      The level the mob will be spawned in
+     * @param difficulty The local difficulty at the position of the mob
+     * @param spawnType  The type of spawn that is occuring
+     * @param spawnData  Optional spawn data relevant to the mob being spawned
+     * @param spawner    The spawner that is attempting to spawn the mob
+     * @param def        If the spawner would normally call finalizeSpawn, regardless of the event
+     */
+    @SuppressWarnings("deprecation") // Call to deprecated Mob#finalizeSpawn is expected.
+    public static FinalizeSpawnEvent finalizeMobSpawnSpawner(Mob mob, ServerLevelAccessor level, DifficultyInstance difficulty, EntitySpawnReason spawnType, @Nullable SpawnGroupData spawnData, IOwnedSpawner spawner, boolean def) {
+        var event = new FinalizeSpawnEvent(mob, level, mob.getX(), mob.getY(), mob.getZ(), difficulty, spawnType, spawnData, spawner.getOwner());
+        NeoForge.EVENT_BUS.post(event);
+
+        if (!event.isCanceled() && def) {
+            // Spawners only call finalizeSpawn under certain conditions, which are passed through as def.
+            // Spawners also do not propagate the SpawnGroupData between spawns, so we ignore the result of Mob#finalizeSpawn
+            mob.finalizeSpawn(level, event.getDifficulty(), event.getSpawnType(), event.getSpawnData());
+        }
+
+        return event;
     }
 
     public static int getExperienceDrop(LivingEntity entity, @Nullable Player attackingPlayer, int originalExperience) {

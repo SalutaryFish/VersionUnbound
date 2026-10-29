@@ -8,6 +8,8 @@ extendable	class	net/minecraft/core/Holder
 inject-interface	net/minecraft/core/Registry	net/neoforged/neoforge/registries/IRegistryExtension<TT;>
 inject-interface	net/minecraft/core/Holder	net/neoforged/neoforge/common/extensions/IHolderExtension<TT;>
 inject-interface	net/minecraft/core/HolderSet	net/neoforged/neoforge/common/extensions/IHolderSetExtension<TT;>
+inject-interface	net/minecraft/world/level/BaseSpawner	net/neoforged/neoforge/common/extensions/IOwnedSpawner
+inject-interface	net/minecraft/world/level/block/entity/trialspawner/TrialSpawner	net/neoforged/neoforge/common/extensions/IOwnedSpawner
 # Methods NeoForge's patches add to vanilla classes (see the patches package).
 inject-interface	net/minecraft/resources/Identifier	net/salutaryfish/versionunbound/neoforge/patches/IdentifierExtension
 inject-interface	net/minecraft/core/HolderLookup$RegistryLookup	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension<TT;>
@@ -17,6 +19,8 @@ inject-interface	net/minecraft/world/level/entity/PersistentEntitySectionManager
 inject-interface	net/minecraft/util/random/WeightedList$Builder	net/salutaryfish/versionunbound/neoforge/patches/WeightedListBuilderExtension<TE;>
 inject-interface	net/minecraft/world/level/chunk/ChunkAccess	net/salutaryfish/versionunbound/neoforge/patches/ChunkAccessExtension
 inject-interface	net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder	net/salutaryfish/versionunbound/neoforge/patches/AttributeSupplierBuilderExtension
+inject-interface	net/minecraft/world/entity/Entity	net/salutaryfish/versionunbound/neoforge/patches/EntityExtension
+inject-interface	net/minecraft/world/entity/Mob	net/salutaryfish/versionunbound/neoforge/patches/MobExtension
 
 # NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
 # NeoForge's patch replaces with GameData's), AttributeSupplierBuilderExtension a supplier's instances, and

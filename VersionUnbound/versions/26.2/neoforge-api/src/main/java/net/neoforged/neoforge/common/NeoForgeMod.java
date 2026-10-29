@@ -67,5 +67,7 @@ public class NeoForgeMod {
 
         HOLDER_SET_TYPES.register(modEventBus);
         NeoForgeRegistriesSetup.setup(modEventBus);
+
+        NeoForge.EVENT_BUS.register(new NeoForgeEventHandler());
     }
 }

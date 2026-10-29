@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * NeoForge's patch to {@code ClientLevel.EntityCallbacks}: {@code EntityLeaveLevelEvent} once the level has stopped
- * tracking an entity. Not yet: {@code onRemovedFromLevel} just before it, and multipart entities' parts, which come with
+ * tracking an entity, with {@code onRemovedFromLevel} just before it. Not yet: multipart entities' parts, which come with
  * the entity extension (Phase 2 step 5).
  */
 @Mixin(targets = "net.minecraft.client.multiplayer.ClientLevel$EntityCallbacks")
@@ -24,6 +24,7 @@ abstract class ClientLevelEntityCallbacksMixin {
 
     @Inject(method = "onTrackingEnd(Lnet/minecraft/world/entity/Entity;)V", at = @At("TAIL"))
     private void versionunbound$entityLeaveLevel(Entity entity, CallbackInfo ci) {
+        entity.onRemovedFromLevel();
         NeoForge.EVENT_BUS.post(new EntityLeaveLevelEvent(entity, this.this$0));
     }
 }

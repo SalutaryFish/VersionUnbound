@@ -47,6 +47,7 @@ import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
+import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
@@ -61,6 +62,7 @@ import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
@@ -133,7 +135,10 @@ final class ServerEvents {
             if (!event.getEntity().level().isClientSide()) session().entityTickPost(event.getEntity());
         });
         bus.addListener(EntityJoinLevelEvent.class, event -> {
-            if (!event.getLevel().isClientSide()) session().entityJoined(event);
+            if (!event.getLevel().isClientSide()) {
+                session().spawns.joined(event);
+                session().entityJoined(event);
+            }
         });
         bus.addListener(EntityLeaveLevelEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().leaves.merge(event.getEntity(), 1, Integer::sum);
@@ -191,6 +196,9 @@ final class ServerEvents {
         bus.addListener(LivingExperienceDropEvent.class, event -> session().survival.experience(event));
         bus.addListener(LivingBreatheEvent.class, event -> session().survival.breathe(event));
         bus.addListener(LivingDrownEvent.class, event -> session().survival.drown(event));
+        bus.addListener(FinalizeSpawnEvent.class, event -> session().spawns.finalizeSpawn(event));
+        bus.addListener(MobSpawnEvent.PositionCheck.class, event -> session().spawns.positionCheck(event));
+        bus.addListener(MobSpawnEvent.SpawnPlacementCheck.class, event -> session().spawns.placementCheck(event));
         bus.addListener(EntityMountEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().survival.mount(event);
         });
@@ -302,7 +310,8 @@ final class ServerEvents {
         private final ProjectileScenario projectiles = new ProjectileScenario(checks, playerChecks);
         private final TeleportScenario teleports = new TeleportScenario(checks, playerChecks);
         private final SurvivalScenario survival = new SurvivalScenario(checks, playerChecks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival);
+        private final SpawnScenario spawns = new SpawnScenario(checks, playerChecks, joins);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -331,7 +340,7 @@ final class ServerEvents {
         private double frozenY;
         private final Map<Entity, int[]> entityTicks = Collections.synchronizedMap(new IdentityHashMap<>());
 
-        // The server tick the projectile, teleport and survival scenarios ran at, -1 until then.
+        // The server tick the projectile, teleport, survival and spawn scenarios ran at, -1 until then.
         private int scenariosTick = -1;
 
         private final AtomicInteger playerTicksPre = new AtomicInteger();
@@ -519,6 +528,7 @@ final class ServerEvents {
                     projectiles.run(overworld, new Vec3(8.5, y, 4.5));
                     teleports.run(overworld, new BlockPos(8, y, 8));
                     survival.run(overworld, new BlockPos(4, y - 8, 4));
+                    spawns.run(overworld, new BlockPos(8, y - 16, 8));
                 }
             }
         }
@@ -571,7 +581,7 @@ final class ServerEvents {
             checks.check("entity ticks fired, Pre and Post", tickingTicks[0] > 0 && tickingTicks[0] == tickingTicks[1]);
             checks.check("canceling EntityTickEvent.Pre skips the tick", frozenTicks[0] > 0 && frozenTicks[1] == 0 && frozen.getY() == frozenY);
             checks.check("a passenger's ticks fire the entity tick events", rider.isPassenger() && riderTicks[0] > 0 && riderTicks[0] == riderTicks[1]);
-            checks.check("the projectile, teleport and survival scenarios ran", scenariosTick > 0);
+            checks.check("the projectile, teleport, survival and spawn scenarios ran", scenariosTick > 0);
 
             // Leave the world as it was.
             living.finish();
@@ -582,6 +592,7 @@ final class ServerEvents {
             server.overworld().setChunkForced(0, 0, false);
             checks.check("EntityLeaveLevelEvent fires once when an entity is removed", count(leaves, ticking) == 1 && count(leaves, frozen) == 1 && count(leaves, rider) == 1);
             LOGGER.info("[events] entities joined server levels: {} new, {} loaded from disk", joinedNew.get(), joinedFromDisk.get());
+            spawns.logChunkGeneration();
         }
 
         void stopped(ServerStoppedEvent event) {

@@ -12,8 +12,10 @@
     "EntityAccessor",
     "ExperienceOrbAccessor",
     "LivingEntityInvoker",
+    "MinecartSpawnerAccessor",
     "ProjectileInvoker",
-    "ShulkerInvoker"
+    "ShulkerInvoker",
+    "VillagerMakeLoveInvoker"
   ],
   "injectors": {
     "defaultRequire": 1

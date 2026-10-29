@@ -20,8 +20,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * NeoForge's patch to {@code ServerLevel}, for the events it fires: entity ticks (cancellable), level saves, and players
- * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}). Not yet:
- * {@code onAddedToLevel} after a player is added (the entity extension, Phase 2 step 5).
+ * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}), and
+ * {@code onAddedToLevel} once a player or a new entity is added.
  */
 @Mixin(ServerLevel.class)
 abstract class ServerLevelMixin {
@@ -39,10 +39,22 @@ abstract class ServerLevelMixin {
         if (NeoForge.EVENT_BUS.post(new EntityJoinLevelEvent(player, (ServerLevel) (Object) this)).isCanceled()) ci.cancel();
     }
 
-    // The event has fired above.
+    // The event has fired above. NeoForge calls onAddedToLevel whether or not the add succeeded.
     @WrapOperation(method = "addPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;addNewEntity(Lnet/minecraft/world/level/entity/EntityAccess;)Z"))
     private boolean versionunbound$addPlayerWithoutEvent(PersistentEntitySectionManager<Entity> entityManager, EntityAccess player, Operation<Boolean> original) {
-        return entityManager.addNewEntityWithoutEvent((Entity) player);
+        boolean added = entityManager.addNewEntityWithoutEvent((Entity) player);
+        ((Entity) player).onAddedToLevel();
+        return added;
+    }
+
+    @WrapOperation(method = "addEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;addNewEntity(Lnet/minecraft/world/level/entity/EntityAccess;)Z"))
+    private boolean versionunbound$entityAddedToLevel(PersistentEntitySectionManager<Entity> entityManager, EntityAccess entity, Operation<Boolean> original) {
+        if (original.call(entityManager, entity)) {
+            ((Entity) entity).onAddedToLevel();
+            return true;
+        } else {
+            return false;
+        }
     }
 
     // At the end of vanilla's "if (!noSave)" block, once the level data, chunks and entities are saved.

@@ -15,6 +15,7 @@ import net.minecraft.world.level.portal.TeleportTransition;
 import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.event.EventHooks;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
+import net.salutaryfish.versionunbound.neoforge.patches.EntityExtension;
 import org.jspecify.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,14 +29,34 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * NeoForge's patch to {@code Entity}: a passenger's tick fires the entity tick events too (entities that aren't
  * passengers are ticked by their level, see {@code ServerLevelMixin} and {@code ClientLevelMixin}), drop capture
  * ({@link EntityDropsCapture}), which {@code LivingDropsEvent} uses, {@code EntityInvulnerabilityCheckEvent}, which
- * gets vanilla's answer and decides, {@code EntityTravelToDimensionEvent} for every teleport (cancellable), and
- * {@code EntityMountEvent} when an entity starts or stops riding (cancellable).
+ * gets vanilla's answer and decides, {@code EntityTravelToDimensionEvent} for every teleport (cancellable),
+ * {@code EntityMountEvent} when an entity starts or stops riding (cancellable), and the flag behind
+ * {@code isAddedToLevel} ({@link EntityExtension}), with which a server entity that a level tracks loads the chunk it
+ * moves into.
  */
 @Mixin(Entity.class)
-abstract class EntityMixin implements EntityDropsCapture {
+abstract class EntityMixin implements EntityDropsCapture, EntityExtension.AddedToLevel {
     // Neo: Short-lived holder of dropped item entities. Used mainly for Neo hooks and event logic.
     @Unique
     private @Nullable Collection<ItemEntity> versionunbound$captureDrops;
+
+    /**
+     * Neo: Internal use for keeping track of entities that are tracked by a world, to
+     * allow guarantees that entity position changes will force a chunk load, avoiding
+     * potential issues with entity desyncing and bad chunk data.
+     */
+    @Unique
+    private boolean versionunbound$isAddedToLevel;
+
+    @Override
+    public boolean versionunbound$isAddedToLevel() {
+        return this.versionunbound$isAddedToLevel;
+    }
+
+    @Override
+    public void versionunbound$setAddedToLevel(boolean added) {
+        this.versionunbound$isAddedToLevel = added;
+    }
 
     @Override
     public @Nullable Collection<ItemEntity> captureDrops() {
@@ -91,5 +112,14 @@ abstract class EntityMixin implements EntityDropsCapture {
     private void versionunbound$dismount(CallbackInfo ci) {
         Entity self = (Entity) (Object) this;
         if (!EventHooks.canMountEntity(self, self.getVehicle(), false)) ci.cancel();
+    }
+
+    // Neo: ensure target chunk is loaded.
+    @Inject(method = "setPosRaw", at = @At("TAIL"))
+    private void versionunbound$loadTargetChunk(double x, double y, double z, CallbackInfo ci) {
+        Entity self = (Entity) (Object) this;
+        if (self.isAddedToLevel() && !self.level().isClientSide() && !self.isRemoved()) {
+            self.level().getChunk((int) Math.floor(x) >> 4, (int) Math.floor(z) >> 4);
+        }
     }
 }

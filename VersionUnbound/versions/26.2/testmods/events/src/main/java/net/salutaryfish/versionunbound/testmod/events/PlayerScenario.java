@@ -61,6 +61,7 @@ final class PlayerScenario {
     private final DestroyItemScenario destroyedItems;
     private final ProjectileScenario projectiles;
     private final SurvivalScenario survival;
+    private final SpawnScenario spawns;
     private final TeleportScenario teleports;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
@@ -102,7 +103,7 @@ final class PlayerScenario {
     private boolean respawnEndConquered;
 
     PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
-            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival) {
+            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival, SpawnScenario spawns) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
@@ -112,6 +113,7 @@ final class PlayerScenario {
         this.projectiles = projectiles;
         this.teleports = teleports;
         this.survival = survival;
+        this.spawns = spawns;
     }
 
     boolean played() {
@@ -337,6 +339,7 @@ final class PlayerScenario {
         projectiles.runWithPlayer(player, level, base);
         teleports.runWithPlayer(player, level, base);
         survival.runWithPlayer(player, level, base);
+        spawns.runWithPlayer(player, level, base);
 
         // Respawn as when leaving the End: the old player is replaced by a new one that keeps everything.
         ServerPlayer old = player;

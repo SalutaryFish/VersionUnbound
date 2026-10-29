@@ -1,5 +1,7 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.PersistentEntitySectionManager;
@@ -15,9 +17,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * NeoForge's patch to {@code PersistentEntitySectionManager}: {@code EntityJoinLevelEvent} (cancellable) for every
- * entity a server level adds, new or loaded, except through {@code addNewEntityWithoutEvent}. Not yet: the calls to
- * {@code onAddedToLevel} after chunk and world generation entities are added, and the entering-section hook, which
- * come with the entity extension (Phase 2 step 5).
+ * entity a server level adds, new or loaded, except through {@code addNewEntityWithoutEvent}, and
+ * {@code onAddedToLevel} after the entities of a loaded or generated chunk are added (NeoForge calls it whether or not
+ * the add succeeded; {@code ServerLevelMixin} calls it for new entities). Not yet: the entering-section hook, which
+ * comes with the entity extension (Phase 2 step 5).
  */
 @Mixin(PersistentEntitySectionManager.class)
 abstract class PersistentEntitySectionManagerMixin<T extends EntityAccess> implements PersistentEntitySectionManagerExtension.WithoutEvent<T> {
@@ -46,5 +49,13 @@ abstract class PersistentEntitySectionManagerMixin<T extends EntityAccess> imple
         }
         if (entity instanceof Entity actualEntity && NeoForge.EVENT_BUS.post(new EntityJoinLevelEvent(actualEntity, actualEntity.level(), loaded)).isCanceled())
             cir.setReturnValue(false);
+    }
+
+    @WrapOperation(method = {"lambda$addLegacyChunkEntities$0", "lambda$addWorldGenChunkEntities$0", "lambda$processPendingLoads$0"},
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/entity/PersistentEntitySectionManager;addEntity(Lnet/minecraft/world/level/entity/EntityAccess;Z)Z"))
+    private boolean versionunbound$entityAddedToLevel(PersistentEntitySectionManager<T> manager, T e, boolean loaded, Operation<Boolean> original) {
+        boolean added = original.call(manager, e, loaded);
+        if (e instanceof Entity entity) entity.onAddedToLevel();
+        return added;
     }
 }

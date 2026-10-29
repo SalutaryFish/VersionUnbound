@@ -15,8 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * NeoForge's patch to {@code ClientLevel}, for the events it fires: level load (at the end of the constructor), entity
- * ticks (cancellable) and entities joining the level (cancellable). Not yet: {@code onAddedToLevel} after an entity is
- * added (the entity extension, Phase 2 step 5).
+ * ticks (cancellable) and entities joining the level (cancellable), and {@code onAddedToLevel} once an entity is added.
  */
 @Mixin(ClientLevel.class)
 abstract class ClientLevelMixin {
@@ -28,6 +27,11 @@ abstract class ClientLevelMixin {
     @Inject(method = "addEntity", at = @At("HEAD"), cancellable = true)
     private void versionunbound$entityJoinLevel(Entity entity, CallbackInfo ci) {
         if (NeoForge.EVENT_BUS.post(new EntityJoinLevelEvent(entity, (ClientLevel) (Object) this)).isCanceled()) ci.cancel();
+    }
+
+    @Inject(method = "addEntity", at = @At("TAIL"))
+    private void versionunbound$entityAddedToLevel(Entity entity, CallbackInfo ci) {
+        entity.onAddedToLevel();
     }
 
     // Neo: Permit cancellation of Entity#tick via EntityTickEvent.Pre
