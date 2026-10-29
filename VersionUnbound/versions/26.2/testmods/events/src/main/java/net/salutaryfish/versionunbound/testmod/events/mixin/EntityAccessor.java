@@ -5,7 +5,10 @@ import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-/** An entity's own random, which {@code TeleportScenario} seeds so that a shulker's random teleport is known. */
+/**
+ * An entity's own random, which {@code TeleportScenario} and {@code TameScenario} seed so that a shulker's random teleport
+ * and a taming roll are known.
+ */
 @Mixin(Entity.class)
 public interface EntityAccessor {
     @Accessor("random")

@@ -47,7 +47,7 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.LivingEntityInvoker;
  * own code paths for that player, the ones the network handler calls: clicking and breaking blocks, using blocks and
  * items, interacting with and attacking entities, a canceled death and the death drops, picking up and tossing items,
  * items breaking or used up,
- * teleporting within the overworld, to the nether and back, a fishing hook and ender pearls, and finally
+ * teleporting within the overworld, to the nether and back, a fishing hook and ender pearls, taming animals, and finally
  * respawning as if from the End. The listeners below cancel or redirect some of these by position or target.
  */
 final class PlayerScenario {
@@ -62,6 +62,7 @@ final class PlayerScenario {
     private final ProjectileScenario projectiles;
     private final SurvivalScenario survival;
     private final SpawnScenario spawns;
+    private final TameScenario tames;
     private final TeleportScenario teleports;
     private ServerPlayer player;
     private int ticksUntilRun = -1;
@@ -103,7 +104,8 @@ final class PlayerScenario {
     private boolean respawnEndConquered;
 
     PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
-            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival, SpawnScenario spawns) {
+            DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival, SpawnScenario spawns,
+            TameScenario tames) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
@@ -114,6 +116,7 @@ final class PlayerScenario {
         this.teleports = teleports;
         this.survival = survival;
         this.spawns = spawns;
+        this.tames = tames;
     }
 
     boolean played() {
@@ -334,12 +337,13 @@ final class PlayerScenario {
         checks.check("each dimension change has the player leave one level and join the other",
                 joins.getOrDefault(player, 0) == 3 && leaves.getOrDefault(player, 0) == 2);
 
-        // A fishing hook (ProjectileScenario) and ender pearls (TeleportScenario), after the teleport checks above:
-        // pearls teleport the player too.
+        // A fishing hook (ProjectileScenario), ender pearls (TeleportScenario) and taming (TameScenario: the player
+        // rides horses), after the teleport checks above: these move the player too.
         projectiles.runWithPlayer(player, level, base);
         teleports.runWithPlayer(player, level, base);
         survival.runWithPlayer(player, level, base);
         spawns.runWithPlayer(player, level, base);
+        tames.runWithPlayer(player, level, base);
 
         // Respawn as when leaving the End: the old player is replaced by a new one that keeps everything.
         ServerPlayer old = player;

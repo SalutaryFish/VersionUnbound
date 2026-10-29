@@ -47,6 +47,7 @@ import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
+import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
 import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
@@ -199,6 +200,7 @@ final class ServerEvents {
         bus.addListener(FinalizeSpawnEvent.class, event -> session().spawns.finalizeSpawn(event));
         bus.addListener(MobSpawnEvent.PositionCheck.class, event -> session().spawns.positionCheck(event));
         bus.addListener(MobSpawnEvent.SpawnPlacementCheck.class, event -> session().spawns.placementCheck(event));
+        bus.addListener(AnimalTameEvent.class, event -> session().tames.tame(event));
         bus.addListener(EntityMountEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().survival.mount(event);
         });
@@ -311,7 +313,9 @@ final class ServerEvents {
         private final TeleportScenario teleports = new TeleportScenario(checks, playerChecks);
         private final SurvivalScenario survival = new SurvivalScenario(checks, playerChecks);
         private final SpawnScenario spawns = new SpawnScenario(checks, playerChecks, joins);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns);
+        private final TameScenario tames = new TameScenario(playerChecks);
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
+                tames);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;

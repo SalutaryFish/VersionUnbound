@@ -309,6 +309,8 @@ final class SpawnScenario {
             playerChecks.check("a mob spawner fires FinalizeSpawnEvent with its block entity as the spawner, finalizes the mob and spawns it",
                     () -> event != null && event.getSpawnType() == EntitySpawnReason.SPAWNER && Either.left(block).equals(event.getSpawner())
                             && spawnType(event.getEntity()) == EntitySpawnReason.SPAWNER && joins.getOrDefault(event.getEntity(), 0) == 1);
+            // The spawner picks a random spot next to the last one, and a mob there obstructs the next spawn.
+            if (check != null) check.getEntity().discard();
 
             // Spawn data with more than the id: vanilla doesn't finalize the mob, NeoForge still fires the event.
             CompoundTag configured = pigTag();

@@ -13,6 +13,7 @@
     "ExperienceOrbAccessor",
     "LivingEntityInvoker",
     "MinecartSpawnerAccessor",
+    "OcelotInvoker",
     "ProjectileInvoker",
     "ShulkerInvoker",
     "VillagerMakeLoveInvoker"
