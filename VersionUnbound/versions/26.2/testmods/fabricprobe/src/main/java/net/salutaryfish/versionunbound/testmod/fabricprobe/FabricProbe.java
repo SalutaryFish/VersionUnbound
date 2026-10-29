@@ -1,6 +1,7 @@
 package net.salutaryfish.versionunbound.testmod.fabricprobe;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.effect.ServerMobEffectEvents;
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
@@ -10,6 +11,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.LivingEntity;
@@ -25,7 +27,8 @@ import org.slf4j.LoggerFactory;
 /**
  * Sets system properties when Fabric runs its mods' initializers, for NeoForge testmods to read: they can't see Fabric
  * mods. The lifecycle testmod checks whether its loading steps ran before or after; the registries testmod checks what
- * Fabric mods see of NeoForge mods' registrations, which by now are done, and that Fabric mods can still register.
+ * Fabric mods see of NeoForge mods' registrations, which by now are done, and that Fabric mods can still register. The
+ * events testmod tags entities for the mob effect listeners here.
  */
 public class FabricProbe implements ModInitializer {
     private static final String PREFIX = "versionunbound.testprobe.";
@@ -37,6 +40,7 @@ public class FabricProbe implements ModInitializer {
         LOGGER.info("[fabricprobe] Fabric is initializing its mods");
         probeRegistries();
         probeEntities();
+        probeEffects();
     }
 
     private static void probeRegistries() {
@@ -81,5 +85,16 @@ public class FabricProbe implements ModInitializer {
         System.setProperty(PREFIX + "sawNeoForgeAttributes", String.valueOf(neoForgeMob != EntityTypes.PIG && DefaultAttributes.hasSupplier(neoForgeMob)
                 && DefaultAttributes.getSupplier(neoForgeMob).getBaseValue(Attributes.MAX_HEALTH) == 12.0
                 && DefaultAttributes.getSupplier(EntityTypes.ZOMBIE).hasAttribute(Attributes.LUCK)));
+    }
+
+    /**
+     * Fabric API's own mob effect events, which fire from the same vanilla methods as NeoForge's, for the events
+     * testmod's effect checks: entities with these tags refuse every effect, or keep regeneration when their effects are
+     * removed early.
+     */
+    private static void probeEffects() {
+        ServerMobEffectEvents.ALLOW_ADD.register((effect, entity, context) -> !entity.entityTags().contains("versionunbound_fabric_refuses_effects"));
+        ServerMobEffectEvents.ALLOW_EARLY_REMOVE.register((effect, entity, context) ->
+                !(entity.entityTags().contains("versionunbound_fabric_keeps_regeneration") && effect.is(MobEffects.REGENERATION)));
     }
 }

@@ -23,6 +23,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -56,6 +57,7 @@ import net.neoforged.neoforge.event.entity.living.LivingEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -331,5 +333,18 @@ public class CommonHooks {
         if (!isAir && entity.isPassenger() && entity.getVehicle() != null && eyeInWater && entity.getVehicle().dismountsUnderwater()) {
             entity.stopRiding();
         }
+    }
+
+    /**
+     * Checks if a mob effect can be applied to an entity by firing {@link MobEffectEvent.Applicable}.
+     *
+     * @param entity The target entity the mob effect is being applied to.
+     * @param effect The mob effect being applied.
+     * @param source The source entity who is applying the mob effect, or {@code null} if none exists.
+     * @return True if the mob effect can be applied, otherwise false.
+     */
+    public static boolean canMobEffectBeApplied(LivingEntity entity, MobEffectInstance effect, @Nullable Entity source) {
+        var event = new MobEffectEvent.Applicable(entity, effect, source);
+        return NeoForge.EVENT_BUS.post(event).getApplicationResult();
     }
 }

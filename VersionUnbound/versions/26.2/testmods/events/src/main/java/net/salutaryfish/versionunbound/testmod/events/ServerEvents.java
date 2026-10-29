@@ -48,6 +48,7 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
+import net.neoforged.neoforge.event.entity.living.EffectParticleModificationEvent;
 import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
@@ -63,6 +64,7 @@ import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
@@ -201,6 +203,22 @@ final class ServerEvents {
         bus.addListener(MobSpawnEvent.PositionCheck.class, event -> session().spawns.positionCheck(event));
         bus.addListener(MobSpawnEvent.SpawnPlacementCheck.class, event -> session().spawns.placementCheck(event));
         bus.addListener(AnimalTameEvent.class, event -> session().tames.tame(event));
+        // Mob effects (Applicable also fires on the client, for the effects the server sends).
+        bus.addListener(MobEffectEvent.Applicable.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().effects.applicable(event);
+        });
+        bus.addListener(MobEffectEvent.Added.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().effects.added(event);
+        });
+        bus.addListener(MobEffectEvent.Remove.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().effects.remove(event);
+        });
+        bus.addListener(MobEffectEvent.Expired.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().effects.expired(event);
+        });
+        bus.addListener(EffectParticleModificationEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().effects.particles(event);
+        });
         bus.addListener(EntityMountEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().survival.mount(event);
         });
@@ -314,6 +332,7 @@ final class ServerEvents {
         private final SurvivalScenario survival = new SurvivalScenario(checks, playerChecks);
         private final SpawnScenario spawns = new SpawnScenario(checks, playerChecks, joins);
         private final TameScenario tames = new TameScenario(playerChecks);
+        private final EffectScenario effects = new EffectScenario(checks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames);
         private final List<String> trace = new CopyOnWriteArrayList<>();
@@ -493,6 +512,7 @@ final class ServerEvents {
             damage.run(overworld, 12.5, y, 9.5);
             living.run(overworld, 6.5, y, 12.5);
             items.run(overworld, 2.5, y, 12.5);
+            effects.run(overworld);
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

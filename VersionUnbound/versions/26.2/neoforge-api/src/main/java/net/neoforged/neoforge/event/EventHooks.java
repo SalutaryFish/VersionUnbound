@@ -11,6 +11,7 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkHolder;
@@ -20,6 +21,8 @@ import net.minecraft.server.players.PlayerList;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
@@ -53,6 +56,7 @@ import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
@@ -469,5 +473,13 @@ public class EventHooks {
      */
     public static void fireServerTickPost(BooleanSupplier haveTime, MinecraftServer server) {
         NeoForge.EVENT_BUS.post(new ServerTickEvent.Post(haveTime, server));
+    }
+
+    public static boolean onEffectRemoved(LivingEntity entity, Holder<MobEffect> effect) {
+        return NeoForge.EVENT_BUS.post(new MobEffectEvent.Remove(entity, effect)).isCanceled();
+    }
+
+    public static boolean onEffectRemoved(LivingEntity entity, MobEffectInstance effectInstance) {
+        return NeoForge.EVENT_BUS.post(new MobEffectEvent.Remove(entity, effectInstance)).isCanceled();
     }
 }

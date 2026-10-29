@@ -18,12 +18,22 @@ import com.llamalad7.mixinextras.sugar.ref.LocalIntRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Stack;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+import net.minecraft.core.Holder;
+import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -38,9 +48,11 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
+import net.neoforged.neoforge.event.entity.living.EffectParticleModificationEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityRandomTeleport;
@@ -67,7 +79,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * ({@code ServerPlayerMixin}), and {@code Player} has its own {@code actuallyHurt} ({@code PlayerMixin}). Also
  * {@code EntityTeleportEvent} in {@code randomTeleport} (for a consumed item, or an enderman), with NeoForge's overload
  * that takes the item; the air supply ({@code LivingBreatheEvent} and {@code LivingDrownEvent}, in
- * {@code CommonHooks.onLivingBreathe}) and {@code LivingExperienceDropEvent}.
+ * {@code CommonHooks.onLivingBreathe}) and {@code LivingExperienceDropEvent}. And mob effects: {@code MobEffectEvent}
+ * ({@code Applicable} in place of {@code canBeAffected} when adding, also forced; {@code Added}; {@code Remove} for one
+ * effect or all, cancelable for each; {@code Expired}, cancelable) and {@code EffectParticleModificationEvent}.
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
@@ -466,5 +480,75 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
     private int versionunbound$experienceDrop(int reward) {
         LivingEntity self = (LivingEntity) (Object) this;
         return EventHooks.getExperienceDrop(self, self.getLastHurtByPlayer(), reward);
+    }
+
+    // An expired effect whose MobEffectEvent.Expired is canceled stays, and isn't reported as removed.
+    @WrapWithCondition(method = "tickEffects", at = @At(value = "INVOKE", target = "Ljava/util/Iterator;remove()V"))
+    private boolean versionunbound$effectExpired(Iterator<Holder<MobEffect>> iterator, @Local(name = "effect") MobEffectInstance effect,
+            @Share("expiryCanceled") LocalBooleanRef canceled) {
+        canceled.set(NeoForge.EVENT_BUS.post(new MobEffectEvent.Expired((LivingEntity) (Object) this, effect)).isCanceled());
+        return !canceled.get();
+    }
+
+    @WrapWithCondition(method = "tickEffects", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;onEffectsRemoved(Ljava/util/Collection;)V"))
+    private boolean versionunbound$expiredEffectRemoved(LivingEntity self, Collection<MobEffectInstance> effects, @Share("expiryCanceled") LocalBooleanRef canceled) {
+        return !canceled.get();
+    }
+
+    // EffectParticleModificationEvent decides each effect's visibility and particles: vanilla's filter and map, which ask
+    // the effect, become NeoForge's, which ask the event.
+    @WrapOperation(method = "updateSynchronizedMobEffectParticles", at = @At(value = "INVOKE", target = "Ljava/util/stream/Stream;filter(Ljava/util/function/Predicate;)Ljava/util/stream/Stream;"))
+    private Stream<EffectParticleModificationEvent> versionunbound$effectParticleEvents(Stream<MobEffectInstance> effects, Predicate<MobEffectInstance> isVisible,
+            Operation<Stream<MobEffectInstance>> original) {
+        return effects.map(effect -> NeoForge.EVENT_BUS.post(new EffectParticleModificationEvent((LivingEntity) (Object) this, effect)))
+                .filter(EffectParticleModificationEvent::isVisible);
+    }
+
+    @WrapOperation(method = "updateSynchronizedMobEffectParticles", at = @At(value = "INVOKE", target = "Ljava/util/stream/Stream;map(Ljava/util/function/Function;)Ljava/util/stream/Stream;"))
+    private Stream<ParticleOptions> versionunbound$effectParticleOptions(Stream<EffectParticleModificationEvent> events, Function<MobEffectInstance, ParticleOptions> getParticleOptions,
+            Operation<Stream<ParticleOptions>> original) {
+        return events.map(EffectParticleModificationEvent::getParticleOptions);
+    }
+
+    // Each effect's MobEffectEvent.Remove can keep it. The copy vanilla reports as removed holds the others, and the kept
+    // ones go back once vanilla has cleared the map. (NeoForge removes only the others instead. Fabric API wraps the same
+    // clear() to keep the effects its own event refuses to remove; this way both kinds stay.)
+    @WrapOperation(method = "removeAllEffects", at = @At(value = "INVOKE", target = "Lcom/google/common/collect/Maps;newHashMap(Ljava/util/Map;)Ljava/util/HashMap;"))
+    private HashMap<Holder<MobEffect>, MobEffectInstance> versionunbound$effectsRemoved(Map<Holder<MobEffect>, MobEffectInstance> activeEffects,
+            Operation<HashMap<Holder<MobEffect>, MobEffectInstance>> original, @Share("keptEffects") LocalRef<Map<Holder<MobEffect>, MobEffectInstance>> kept) {
+        HashMap<Holder<MobEffect>, MobEffectInstance> map = new HashMap<>(activeEffects.size());
+        kept.set(new HashMap<>());
+        for (Map.Entry<Holder<MobEffect>, MobEffectInstance> entry : activeEffects.entrySet()) {
+            if (!EventHooks.onEffectRemoved((LivingEntity) (Object) this, entry.getValue())) {
+                map.put(entry.getKey(), entry.getValue());
+            } else {
+                kept.get().put(entry.getKey(), entry.getValue());
+            }
+        }
+        return map;
+    }
+
+    @Inject(method = "removeAllEffects", at = @At(value = "INVOKE", target = "Ljava/util/Map;clear()V", shift = At.Shift.AFTER))
+    private void versionunbound$keepEffects(CallbackInfoReturnable<Boolean> cir, @Share("keptEffects") LocalRef<Map<Holder<MobEffect>, MobEffectInstance>> kept) {
+        ((LivingEntity) (Object) this).getActiveEffectsMap().putAll(kept.get());
+    }
+
+    // MobEffectEvent.Applicable decides in place of canBeAffected, which the event asks when it has no result of its own.
+    @WrapOperation(method = {"addEffect(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z", "forceAddEffect"},
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;canBeAffected(Lnet/minecraft/world/effect/MobEffectInstance;)Z"))
+    private boolean versionunbound$effectApplicable(LivingEntity self, MobEffectInstance newEffect, Operation<Boolean> original, @Local(argsOnly = true) @Nullable Entity source) {
+        return CommonHooks.canMobEffectBeApplied(self, newEffect, source);
+    }
+
+    // Once the effect the entity already has is known, before it's added or updated (whether or not the update changes it).
+    @ModifyVariable(method = "addEffect(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z", at = @At("STORE"), name = "effect")
+    private @Nullable MobEffectInstance versionunbound$effectAdded(@Nullable MobEffectInstance effect, MobEffectInstance newEffect, @Nullable Entity source) {
+        NeoForge.EVENT_BUS.post(new MobEffectEvent.Added((LivingEntity) (Object) this, effect, newEffect, source));
+        return effect;
+    }
+
+    @Inject(method = "removeEffect", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$effectRemove(Holder<MobEffect> effect, CallbackInfoReturnable<Boolean> cir) {
+        if (EventHooks.onEffectRemoved((LivingEntity) (Object) this, effect)) cir.setReturnValue(false);
     }
 }
