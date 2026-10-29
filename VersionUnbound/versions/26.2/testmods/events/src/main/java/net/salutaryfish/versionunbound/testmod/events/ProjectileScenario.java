@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
@@ -25,8 +26,11 @@ import net.minecraft.world.entity.projectile.ShulkerBullet;
 import net.minecraft.world.entity.projectile.arrow.Arrow;
 import net.minecraft.world.entity.projectile.hurtingprojectile.SmallFireball;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.Snowball;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownSplashPotion;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.alchemy.Potions;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -72,15 +76,12 @@ final class ProjectileScenario {
         checks.check("canceling ProjectileImpactEvent keeps an arrow from sticking in a block", hitBlock(bounced, wall) && bounced.shakeTime == 0);
         level.removeBlock(wall, false);
 
-        // Thrown items (ThrowableProjectile). A canceled impact only skips the move to the hit: NeoForge's patch leaves
-        // vanilla's later hit check alone, so the snowball still hits and goes.
-        Function<Vec3, Projectile> snowball = start -> new Snowball(level, start.x, start.y, start.z, new ItemStack(Items.SNOWBALL));
-        Shot thrownHit = shoot(level, pos, snowball, false);
-        checks.check("ProjectileImpactEvent fires when a thrown item hits an entity, which moves it to the hit",
-                thrownHit.hitTarget() && thrownHit.projectile().isRemoved() && thrownHit.travelled() < 0.9);
-        Shot thrownMiss = shoot(level, pos, snowball, true);
-        checks.check("canceling ProjectileImpactEvent moves a thrown item on past the hit, which it still makes (as on NeoForge)",
-                thrownMiss.hitTarget() && thrownMiss.projectile().isRemoved() && thrownMiss.travelled() > 0.95);
+        // Thrown items (ThrowableProjectile) move to the hit and go; a canceled one flies its full step and doesn't hit
+        // (NeoForge 26.2 still hits there, fixed in ThrowableProjectileMixin). A splash potion's hit slows the zombie.
+        expectThrownHits("a snowball", level, pos, start -> new Snowball(level, start.x, start.y, start.z, new ItemStack(Items.SNOWBALL)), Shot::removed);
+        ItemStack slowness = PotionContents.createItemStack(Items.SPLASH_POTION, Potions.SLOWNESS);
+        expectThrownHits("a splash potion", level, pos, start -> new ThrownSplashPotion(level, start.x, start.y, start.z, slowness.copy()),
+                shot -> shot.removed() && shot.slowed());
 
         // Fireballs (AbstractHurtingProjectile), shulker bullets and fireworks go when they hit; llama spit goes only on
         // blocks, and hurts what it hits only for a llama (one that isn't in the level).
@@ -120,6 +121,16 @@ final class ProjectileScenario {
                 miss.hitTarget() && !miss.projectile().isRemoved() && !miss.hurt());
     }
 
+    /** Like {@link #expectHits}, for thrown items, which also move only as far as the hit. */
+    private void expectThrownHits(String what, ServerLevel level, Vec3 pos, Function<Vec3, Projectile> projectile, Predicate<Shot> hitDid) {
+        Shot hit = shoot(level, pos, projectile, false);
+        checks.check("ProjectileImpactEvent fires when " + what + " hits an entity, which moves it to the hit, and it hits",
+                hit.hitTarget() && hit.travelled() < 0.9 && hitDid.test(hit));
+        Shot miss = shoot(level, pos, projectile, true);
+        checks.check("canceling ProjectileImpactEvent for " + what + " keeps it flying its full step, and it doesn't hit",
+                miss.hitTarget() && miss.travelled() > 0.95 && !miss.projectile().isRemoved() && !hitDid.test(miss));
+    }
+
     /**
      * Ticks a projectile once, from a block in front of a fresh zombie at {@code pos}, flying straight at it. The zombie
      * is removed again; the result says what the event and the tick did.
@@ -135,7 +146,9 @@ final class ProjectileScenario {
             List<ProjectileImpactEvent> events = impacts.getOrDefault(projectile, List.of());
             boolean hitTarget = events.size() == 1 && events.get(0).getRayTraceResult() instanceof EntityHitResult hit && hit.getEntity() == target;
             boolean hurt = target.getHealth() < target.getMaxHealth() || target.getRemainingFireTicks() > 0;
-            return new Shot(projectile, target, hitTarget, hurt, projectile.getZ() - start.z);
+            // Read now: removing the zombie clears its effects.
+            boolean slowed = target.hasEffect(MobEffects.SLOWNESS);
+            return new Shot(projectile, target, hitTarget, hurt, slowed, projectile.getZ() - start.z);
         } finally {
             target.discard();
         }
@@ -165,8 +178,11 @@ final class ProjectileScenario {
         return projectile;
     }
 
-    /** One shot: the projectile and its target, whether the event saw the target hit, and how far the projectile moved. */
-    private record Shot(Projectile projectile, LivingEntity target, boolean hitTarget, boolean hurt, double travelled) {
+    /**
+     * One shot: the projectile and its target, whether the event saw the target hit, whether the target was hurt or
+     * slowed, and how far the projectile moved.
+     */
+    private record Shot(Projectile projectile, LivingEntity target, boolean hitTarget, boolean hurt, boolean slowed, double travelled) {
         boolean removed() {
             return projectile.isRemoved();
         }
