@@ -62,6 +62,7 @@ import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
+import net.neoforged.neoforge.event.level.NoteBlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.AttributeSupplierBuilderExtension;
@@ -296,6 +297,13 @@ public class CommonHooks {
             return !event.isCanceled();
         }
         return false;
+    }
+
+    public static int onNoteChange(Level level, BlockPos pos, BlockState state, int old, int _new) {
+        NoteBlockEvent.Change event = new NoteBlockEvent.Change(level, pos, state, old, _new);
+        if (NeoForge.EVENT_BUS.post(event).isCanceled())
+            return -1;
+        return event.getVanillaNoteId();
     }
 
     public static boolean canEntityDestroy(ServerLevel level, BlockPos pos, LivingEntity entity) {

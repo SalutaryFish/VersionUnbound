@@ -7,6 +7,7 @@ package net.neoforged.neoforge.event;
 
 import com.mojang.brigadier.CommandDispatcher;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import net.minecraft.commands.CommandBuildContext;
@@ -44,6 +45,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BaseSpawner;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ServerExplosion;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.SpawnData;
 import net.minecraft.world.level.block.state.BlockState;
@@ -52,6 +54,7 @@ import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IOwnedSpawner;
 import net.neoforged.neoforge.event.entity.EntityEvent;
@@ -77,6 +80,8 @@ import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
 import net.neoforged.neoforge.event.level.BlockEvent.NeighborNotifyEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
 import net.neoforged.neoforge.event.level.ChunkWatchEvent;
+import net.neoforged.neoforge.event.level.ExplosionEvent;
+import net.neoforged.neoforge.event.level.ExplosionKnockbackEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
@@ -311,6 +316,41 @@ public class EventHooks {
 
     public static void onPlayerClone(Player player, Player oldPlayer, boolean wasDeath) {
         NeoForge.EVENT_BUS.post(new PlayerEvent.Clone(player, oldPlayer, wasDeath));
+    }
+
+    public static boolean onExplosionStart(Level level, ServerExplosion explosion) {
+        return NeoForge.EVENT_BUS.post(new ExplosionEvent.Start(level, explosion)).isCanceled();
+    }
+
+    public static void onExplosionDetonate(Level level, ServerExplosion explosion, List<Entity> entities, List<BlockPos> blocks) {
+        //Filter entities to only those who are effected, to prevent modders from seeing more then will be hurt.
+        /* Enable this if we get issues with modders looping to much.
+        Iterator<Entity> itr = list.iterator();
+        Vec3 p = explosion.getPosition();
+        while (itr.hasNext())
+        {
+            Entity e = itr.next();
+            double dist = e.getDistance(p.xCoord, p.yCoord, p.zCoord) / diameter;
+            if (e.isImmuneToExplosions() || dist > 1.0F) itr.remove();
+        }
+        */
+        NeoForge.EVENT_BUS.post(new ExplosionEvent.Detonate(level, explosion, entities, blocks));
+    }
+
+    /**
+     * To be called when an explosion has calculated the knockback velocity
+     * but has not yet added the knockback to the entity caught in blast.
+     *
+     * @param level           The level that the explosion is in
+     * @param explosion       Explosion that is happening
+     * @param entity          The entity caught in the explosion's blast
+     * @param initialVelocity The explosion calculated velocity for the entity
+     * @return The new explosion velocity to add to the entity's existing velocity
+     */
+    public static Vec3 getExplosionKnockback(Level level, ServerExplosion explosion, Entity entity, Vec3 initialVelocity, List<BlockPos> blocks) {
+        ExplosionKnockbackEvent event = new ExplosionKnockbackEvent(level, explosion, entity, initialVelocity, blocks);
+        NeoForge.EVENT_BUS.post(event);
+        return event.getKnockbackVelocity();
     }
 
     public static boolean onCreateWorldSpawn(Level level, ServerLevelData settings) {

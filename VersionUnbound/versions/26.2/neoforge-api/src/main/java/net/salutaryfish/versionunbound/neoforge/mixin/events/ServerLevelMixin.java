@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProgressListener;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ServerExplosion;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.PersistentEntitySectionManager;
@@ -31,8 +32,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * NeoForge's patch to {@code ServerLevel}, for the events it fires: entity ticks (cancellable), level saves, and players
  * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}),
  * {@code onAddedToLevel} once a player or a new entity is added, {@code BlockEvent.NeighborNotifyEvent} for neighbor
- * updates (cancellable only when one side is left out), and {@code EntityMobGriefingEvent} for the explosion's source
- * when a mob's explosion decides whether it breaks blocks.
+ * updates (cancellable only when one side is left out), {@code EntityMobGriefingEvent} for the explosion's source
+ * when a mob's explosion decides whether it breaks blocks, and {@code ExplosionEvent.Start} (cancellable) before an
+ * explosion explodes (the explosion's other events are in {@code ServerExplosionMixin}).
  */
 @Mixin(ServerLevel.class)
 abstract class ServerLevelMixin {
@@ -97,6 +99,12 @@ abstract class ServerLevelMixin {
     @ModifyExpressionValue(method = "explode", at = @At("MIXINEXTRAS:EXPRESSION"))
     private Object versionunbound$explosionGriefing(Object mobGriefing, @Local(argsOnly = true) @Nullable Entity source) {
         return EventHooks.canEntityGrief((ServerLevel) (Object) this, source);
+    }
+
+    // After the explosion is built, before it explodes: a canceled explosion does nothing, and no packet goes out.
+    @Inject(method = "explode", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/ServerExplosion;explode()I"), cancellable = true)
+    private void versionunbound$explosionStart(CallbackInfo ci, @Local ServerExplosion explosion) {
+        if (EventHooks.onExplosionStart((ServerLevel) (Object) this, explosion)) ci.cancel();
     }
 
     @Inject(method = "updateNeighborsAtExceptFromFacing", at = @At("HEAD"), cancellable = true)

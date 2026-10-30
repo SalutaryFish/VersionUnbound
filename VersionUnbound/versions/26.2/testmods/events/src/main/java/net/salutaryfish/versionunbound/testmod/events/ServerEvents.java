@@ -82,7 +82,10 @@ import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
 import net.neoforged.neoforge.event.level.ChunkWatchEvent;
+import net.neoforged.neoforge.event.level.ExplosionEvent;
+import net.neoforged.neoforge.event.level.ExplosionKnockbackEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.level.NoteBlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
@@ -257,6 +260,12 @@ final class ServerEvents {
             session().players.constructing(event);
         });
         bus.addListener(LivingEvent.LivingVisibilityEvent.class, event -> session().entities.visibility(event));
+        // Explosion events fire only on the server; note blocks play on both sides (ClientEvents counts the client's).
+        bus.addListener(ExplosionEvent.Start.class, event -> session().levelEvents.explosionStart(event));
+        bus.addListener(ExplosionEvent.Detonate.class, event -> session().levelEvents.explosionDetonate(event));
+        bus.addListener(ExplosionKnockbackEvent.class, event -> session().levelEvents.explosionKnockback(event));
+        bus.addListener(NoteBlockEvent.Play.class, event -> session().levelEvents.notePlay(event));
+        bus.addListener(NoteBlockEvent.Change.class, event -> session().levelEvents.noteChange(event));
         // Crop growth fires only on the server.
         bus.addListener(CropGrowEvent.Pre.class, event -> session().crops.pre(event));
         bus.addListener(CropGrowEvent.Post.class, event -> session().crops.post(event));
@@ -376,8 +385,9 @@ final class ServerEvents {
         private final GriefingScenario griefing = new GriefingScenario(checks);
         private final CropScenario crops = new CropScenario(checks);
         private final EntityScenario entities = new EntityScenario(checks);
+        private final LevelScenario levelEvents = new LevelScenario(checks, playerChecks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
-                tames, blocks);
+                tames, blocks, levelEvents);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -561,6 +571,7 @@ final class ServerEvents {
             griefing.run(overworld, BlockPos.containing(8, y - 36, 8));
             crops.run(overworld, BlockPos.containing(8, y - 48, 8));
             entities.run(overworld);
+            levelEvents.run(overworld, BlockPos.containing(8, y - 60, 8));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {
@@ -589,6 +600,7 @@ final class ServerEvents {
                 serverTicksPre++;
             } else {
                 serverTicksPost++;
+                levelEvents.tick();
                 if (serverTicksPre != serverTicksPost) serverTicksAlternate = false;
                 // Once the forced chunk's entities are visible (to projectiles' hit checks), a few ticks after server
                 // started, or more in a new world. Far below the entities spawned at server started, which fall.
@@ -601,6 +613,7 @@ final class ServerEvents {
                     teleports.run(overworld, new BlockPos(8, y, 8));
                     survival.run(overworld, new BlockPos(4, y - 8, 4));
                     spawns.run(overworld, new BlockPos(8, y - 16, 8));
+                    levelEvents.runExplosions(overworld, new BlockPos(8, y - 32, 8));
                 }
             }
         }
@@ -640,6 +653,7 @@ final class ServerEvents {
 
         void stopping(ServerStoppingEvent event) {
             trace("stopping");
+            levelEvents.stopping();
             checks.check("server ticks fired, Pre and Post in turn", serverTicksPre > 0 && serverTicksAlternate && serverTicksPre == serverTicksPost);
             checks.check("server tick events carry the server and its time budget", serverTickServer && serverTickHasTime);
             int[] overworldTicks = levelTicks.getOrDefault(Level.OVERWORLD, new int[2]);

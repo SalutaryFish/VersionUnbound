@@ -33,6 +33,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.level.NoteBlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
@@ -85,6 +86,7 @@ final class ClientEvents {
     private static PlayerDestroyItemEvent destroyedItem;
     private static BlockPos neighborNotifyPos;
     private static BlockEvent.NeighborNotifyEvent neighborNotify;
+    private static int notesPlayed;
 
     private static final Set<LocalPlayer> sizedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> constructedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -104,6 +106,9 @@ final class ClientEvents {
         bus.addListener(ClientTickEvent.Post.class, event -> clientTickPost());
         bus.addListener(BlockEvent.NeighborNotifyEvent.class, event -> {
             if (event.getLevel().isClientSide() && event.getPos().equals(neighborNotifyPos)) neighborNotify = event;
+        });
+        bus.addListener(NoteBlockEvent.Play.class, event -> {
+            if (event.getLevel().isClientSide()) notesPlayed++;
         });
         bus.addListener(LevelEvent.Load.class, event -> {
             if (event.getLevel() instanceof ClientLevel level) loadedLevel = level;
@@ -282,6 +287,8 @@ final class ClientEvents {
         CHECKS.check("the local player joined the client level, and the old one left it on the respawn",
                 joinedPlayers.contains(minecraft.player) && clone != null && leftPlayers.contains(clone.getOldPlayer()));
         CHECKS.check("EntityEvent.Size and EntityConstructing fired on the client for the local player, in that order", constructedPlayers.contains(minecraft.player));
+        // The server's player scenario tunes a note block next to the player and plays it again 20 ticks later.
+        CHECKS.check("NoteBlockEvent.Play fires on the client for the notes the server plays", notesPlayed > 0);
 
         CHECKS.check("ChunkEvent.Load fires for the chunks the server sends, never as new chunks", chunkLoads > 0 && chunkLoadsConsistent);
         // A chunk two chunks east of the player, dropped as ClientboundForgetLevelChunkPacket's handler does.
