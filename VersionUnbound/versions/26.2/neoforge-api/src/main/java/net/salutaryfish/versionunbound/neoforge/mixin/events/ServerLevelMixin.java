@@ -1,7 +1,11 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
+import com.llamalad7.mixinextras.expression.Definition;
+import com.llamalad7.mixinextras.expression.Expression;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,8 +30,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * NeoForge's patch to {@code ServerLevel}, for the events it fires: entity ticks (cancellable), level saves, and players
  * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}),
- * {@code onAddedToLevel} once a player or a new entity is added, and {@code BlockEvent.NeighborNotifyEvent} for neighbor
- * updates (cancellable only when one side is left out).
+ * {@code onAddedToLevel} once a player or a new entity is added, {@code BlockEvent.NeighborNotifyEvent} for neighbor
+ * updates (cancellable only when one side is left out), and {@code EntityMobGriefingEvent} for the explosion's source
+ * when a mob's explosion decides whether it breaks blocks.
  */
 @Mixin(ServerLevel.class)
 abstract class ServerLevelMixin {
@@ -82,6 +87,16 @@ abstract class ServerLevelMixin {
     private void versionunbound$neighborNotify(BlockPos pos, Block sourceBlock, @Nullable Orientation orientation, CallbackInfo ci) {
         ServerLevel level = (ServerLevel) (Object) this;
         EventHooks.onNeighborNotify(level, pos, level.getBlockState(pos), EnumSet.allOf(Direction.class), false).isCanceled();
+    }
+
+    // The mob griefing game rule check for ExplosionInteraction.MOB asks the event about the explosion's source (null:
+    // the game rule).
+    @Definition(id = "get", method = "Lnet/minecraft/world/level/gamerules/GameRules;get(Lnet/minecraft/world/level/gamerules/GameRule;)Ljava/lang/Object;")
+    @Definition(id = "MOB_GRIEFING", field = "Lnet/minecraft/world/level/gamerules/GameRules;MOB_GRIEFING:Lnet/minecraft/world/level/gamerules/GameRule;")
+    @Expression("?.get(MOB_GRIEFING)")
+    @ModifyExpressionValue(method = "explode", at = @At("MIXINEXTRAS:EXPRESSION"))
+    private Object versionunbound$explosionGriefing(Object mobGriefing, @Local(argsOnly = true) @Nullable Entity source) {
+        return EventHooks.canEntityGrief((ServerLevel) (Object) this, source);
     }
 
     @Inject(method = "updateNeighborsAtExceptFromFacing", at = @At("HEAD"), cancellable = true)

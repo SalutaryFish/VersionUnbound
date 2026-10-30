@@ -21,6 +21,8 @@ inject-interface	net/minecraft/world/level/chunk/ChunkAccess	net/salutaryfish/ve
 inject-interface	net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder	net/salutaryfish/versionunbound/neoforge/patches/AttributeSupplierBuilderExtension
 inject-interface	net/minecraft/world/entity/Entity	net/salutaryfish/versionunbound/neoforge/patches/EntityExtension
 inject-interface	net/minecraft/world/entity/Mob	net/salutaryfish/versionunbound/neoforge/patches/MobExtension
+inject-interface	net/minecraft/world/level/block/Block	net/salutaryfish/versionunbound/neoforge/patches/BlockExtension
+inject-interface	net/minecraft/world/level/block/state/BlockState	net/salutaryfish/versionunbound/neoforge/patches/BlockStateExtension
 
 # NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
 # NeoForge's patch replaces with GameData's), AttributeSupplierBuilderExtension a supplier's instances, and

@@ -57,6 +57,7 @@ import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingConversionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDestroyBlockEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDrownEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
@@ -145,6 +146,7 @@ final class ServerEvents {
             if (!event.getLevel().isClientSide()) {
                 session().spawns.joined(event);
                 session().conversions.joined(event);
+                session().griefing.joined(event);
                 session().entityJoined(event);
             }
         });
@@ -240,7 +242,11 @@ final class ServerEvents {
             if (!event.getLevel().isClientSide()) session().blocks.neighborNotify(event);
         });
         bus.addListener(BlockEvent.FarmlandTrampleEvent.class, event -> session().blocks.farmlandTrample(event));
-        bus.addListener(EntityMobGriefingEvent.class, event -> session().blocks.mobGriefing(event));
+        bus.addListener(EntityMobGriefingEvent.class, event -> {
+            session().blocks.mobGriefing(event);
+            session().griefing.mobGriefing(event);
+        });
+        bus.addListener(LivingDestroyBlockEvent.class, event -> session().griefing.destroyBlock(event));
         // Teleport events fire only on the server.
         for (Class<? extends EntityTeleportEvent> kind : List.of(EntityTeleportEvent.TeleportCommand.class, EntityTeleportEvent.SpreadPlayersCommand.class,
                 EntityTeleportEvent.EnderEntity.class, EntityTeleportEvent.EnderPearl.class, EntityTeleportEvent.ItemConsumption.class)) {
@@ -354,6 +360,7 @@ final class ServerEvents {
         private final EffectScenario effects = new EffectScenario(checks);
         private final ConversionScenario conversions = new ConversionScenario(checks);
         private final BlockScenario blocks = new BlockScenario(checks, playerChecks);
+        private final GriefingScenario griefing = new GriefingScenario(checks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames, blocks);
         private final List<String> trace = new CopyOnWriteArrayList<>();
@@ -536,6 +543,7 @@ final class ServerEvents {
             effects.run(overworld);
             conversions.run(overworld, new Vec3(2.5, y, 6.5));
             blocks.run(overworld, BlockPos.containing(8, y - 24, 8));
+            griefing.run(overworld, BlockPos.containing(8, y - 36, 8));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

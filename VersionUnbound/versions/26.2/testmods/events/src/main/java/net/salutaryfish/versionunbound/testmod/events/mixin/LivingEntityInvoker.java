@@ -15,7 +15,8 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 /**
  * The death drops ({@code LivingEntity.die} calls this), for the player death drop checks in {@code PlayerScenario}, and
  * the remaining use time, so {@code DestroyItemScenario} can release a bow as if it had been drawn. For
- * {@code EffectScenario}: one tick of the effects, and the synced effect particles.
+ * {@code EffectScenario}: one tick of the effects, and the synced effect particles. For {@code GriefingScenario}: the
+ * wither rose a wither's victim leaves.
  */
 @Mixin(LivingEntity.class)
 public interface LivingEntityInvoker {
@@ -30,6 +31,9 @@ public interface LivingEntityInvoker {
 
     @Invoker("tickEffects")
     void events$tickEffects();
+
+    @Invoker("createWitherRose")
+    void events$createWitherRose(@Nullable LivingEntity killer);
 
     @Accessor("DATA_EFFECT_PARTICLES")
     static EntityDataAccessor<List<ParticleOptions>> events$dataEffectParticles() {

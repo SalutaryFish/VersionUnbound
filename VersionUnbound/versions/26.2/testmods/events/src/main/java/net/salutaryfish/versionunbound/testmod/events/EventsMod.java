@@ -4,6 +4,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -17,9 +18,12 @@ public class EventsMod {
 
     private static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MOD_ID);
     static final DeferredItem<VanishingItem> VANISHING_ITEM = ITEMS.registerItem("vanishing_item", VanishingItem::new);
+    private static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MOD_ID);
+    static final DeferredBlock<MobProofBlock> MOB_PROOF_BLOCK = BLOCKS.registerBlock("mob_proof_block", MobProofBlock::new);
 
     public EventsMod(IEventBus modBus, ModContainer container, Dist dist) {
         ITEMS.register(modBus);
+        BLOCKS.register(modBus);
         ServerEvents.register(modBus, container);
         if (dist.isClient()) {
             ClientEvents.register();

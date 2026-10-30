@@ -1,7 +1,11 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
+import com.llamalad7.mixinextras.expression.Definition;
+import com.llamalad7.mixinextras.expression.Expression;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.LivingEntity;
@@ -11,6 +15,7 @@ import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.MobExtension;
 import org.jspecify.annotations.Nullable;
@@ -27,7 +32,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * can replace the target), and the spawn type and spawn cancellation of {@link MobExtension}: {@code finalizeSpawn}
  * records its spawn reason, which is saved and loaded. Brain-driven mobs set their target in {@code StartAttacking}
  * ({@code StartAttackingMixin}). {@code FinalizeSpawnEvent} fires where vanilla calls {@code finalizeSpawn}
- * ({@code CoremodMixinPlugin}).
+ * ({@code CoremodMixinPlugin}). And {@code EntityMobGriefingEvent} before a mob picks up items.
  */
 @Mixin(Mob.class)
 abstract class MobMixin implements MobExtension.SpawnState {
@@ -58,6 +63,16 @@ abstract class MobMixin implements MobExtension.SpawnState {
         if (!changeTargetEvent.isCanceled()) {
             original.call(mob, changeTargetEvent.getNewAboutToBeSetTarget());
         }
+    }
+
+    // The mob griefing game rule check before picking up items, last in its condition.
+    @Definition(id = "get", method = "Lnet/minecraft/world/level/gamerules/GameRules;get(Lnet/minecraft/world/level/gamerules/GameRule;)Ljava/lang/Object;")
+    @Definition(id = "MOB_GRIEFING", field = "Lnet/minecraft/world/level/gamerules/GameRules;MOB_GRIEFING:Lnet/minecraft/world/level/gamerules/GameRule;")
+    @Expression("?.get(MOB_GRIEFING)")
+    @ModifyExpressionValue(method = "aiStep", at = @At("MIXINEXTRAS:EXPRESSION"))
+    private Object versionunbound$pickUpGriefing(Object mobGriefing) {
+        Mob mob = (Mob) (Object) this;
+        return EventHooks.canEntityGrief((ServerLevel) mob.level(), mob);
     }
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))

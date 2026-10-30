@@ -81,7 +81,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * that takes the item; the air supply ({@code LivingBreatheEvent} and {@code LivingDrownEvent}, in
  * {@code CommonHooks.onLivingBreathe}) and {@code LivingExperienceDropEvent}. And mob effects: {@code MobEffectEvent}
  * ({@code Applicable} in place of {@code canBeAffected} when adding, also forced; {@code Added}; {@code Remove} for one
- * effect or all, cancelable for each; {@code Expired}, cancelable) and {@code EffectParticleModificationEvent}.
+ * effect or all, cancelable for each; {@code Expired}, cancelable) and {@code EffectParticleModificationEvent}. And
+ * {@code EntityMobGriefingEvent} for a wither before its victim leaves a wither rose.
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
@@ -550,5 +551,14 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
     @Inject(method = "removeEffect", at = @At("HEAD"), cancellable = true)
     private void versionunbound$effectRemove(Holder<MobEffect> effect, CallbackInfoReturnable<Boolean> cir) {
         if (EventHooks.onEffectRemoved((LivingEntity) (Object) this, effect)) cir.setReturnValue(false);
+    }
+
+    // The mob griefing game rule check for a wither's victim; the killer is the wither.
+    @Definition(id = "get", method = "Lnet/minecraft/world/level/gamerules/GameRules;get(Lnet/minecraft/world/level/gamerules/GameRule;)Ljava/lang/Object;")
+    @Definition(id = "MOB_GRIEFING", field = "Lnet/minecraft/world/level/gamerules/GameRules;MOB_GRIEFING:Lnet/minecraft/world/level/gamerules/GameRule;")
+    @Expression("?.get(MOB_GRIEFING)")
+    @ModifyExpressionValue(method = "createWitherRose", at = @At("MIXINEXTRAS:EXPRESSION"))
+    private Object versionunbound$witherRoseGriefing(Object mobGriefing, @Local(argsOnly = true) @Nullable LivingEntity killer) {
+        return EventHooks.canEntityGrief((ServerLevel) ((LivingEntity) (Object) this).level(), killer);
     }
 }
