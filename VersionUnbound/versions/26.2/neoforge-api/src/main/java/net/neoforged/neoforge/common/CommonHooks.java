@@ -262,6 +262,15 @@ public class CommonHooks {
         NeoForge.EVENT_BUS.post(new PlayerInteractEvent.LeftClickEmpty(player));
     }
 
+    public static boolean onFarmlandTrample(ServerLevel level, BlockPos pos, BlockState state, double fallDistance, Entity entity) {
+        if (entity.canTrample(level, state, pos, fallDistance)) {
+            BlockEvent.FarmlandTrampleEvent event = new BlockEvent.FarmlandTrampleEvent(level, pos, state, fallDistance, entity);
+            NeoForge.EVENT_BUS.post(event);
+            return !event.isCanceled();
+        }
+        return false;
+    }
+
     private static final Map<EntityType<? extends LivingEntity>, AttributeSupplier> FORGE_ATTRIBUTES = new HashMap<>();
 
     /** FOR INTERNAL USE ONLY, DO NOT CALL DIRECTLY */

@@ -41,6 +41,7 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityMobGriefingEvent;
 import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
@@ -74,6 +75,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
@@ -233,6 +235,12 @@ final class ServerEvents {
         bus.addListener(EntityMountEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().survival.mount(event);
         });
+        // Neighbor updates also fire on the client (ClientEvents checks that); trampling and griefing only on the server.
+        bus.addListener(BlockEvent.NeighborNotifyEvent.class, event -> {
+            if (!event.getLevel().isClientSide()) session().blocks.neighborNotify(event);
+        });
+        bus.addListener(BlockEvent.FarmlandTrampleEvent.class, event -> session().blocks.farmlandTrample(event));
+        bus.addListener(EntityMobGriefingEvent.class, event -> session().blocks.mobGriefing(event));
         // Teleport events fire only on the server.
         for (Class<? extends EntityTeleportEvent> kind : List.of(EntityTeleportEvent.TeleportCommand.class, EntityTeleportEvent.SpreadPlayersCommand.class,
                 EntityTeleportEvent.EnderEntity.class, EntityTeleportEvent.EnderPearl.class, EntityTeleportEvent.ItemConsumption.class)) {
@@ -345,8 +353,9 @@ final class ServerEvents {
         private final TameScenario tames = new TameScenario(playerChecks);
         private final EffectScenario effects = new EffectScenario(checks);
         private final ConversionScenario conversions = new ConversionScenario(checks);
+        private final BlockScenario blocks = new BlockScenario(checks, playerChecks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
-                tames);
+                tames, blocks);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -526,6 +535,7 @@ final class ServerEvents {
             items.run(overworld, 2.5, y, 12.5);
             effects.run(overworld);
             conversions.run(overworld, new Vec3(2.5, y, 6.5));
+            blocks.run(overworld, BlockPos.containing(8, y - 24, 8));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

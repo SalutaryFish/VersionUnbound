@@ -1,6 +1,7 @@
 package net.salutaryfish.versionunbound.testmod.events;
 
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.BlockHitResult;
@@ -27,6 +29,7 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
@@ -79,6 +82,8 @@ final class ClientEvents {
     private static boolean chunkLoadsConsistent = true;
     private static ChunkEvent.Unload chunkUnload;
     private static PlayerDestroyItemEvent destroyedItem;
+    private static BlockPos neighborNotifyPos;
+    private static BlockEvent.NeighborNotifyEvent neighborNotify;
 
     private static final Set<LocalPlayer> joinedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> leftPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -94,6 +99,9 @@ final class ClientEvents {
             clientTicksPre++;
         });
         bus.addListener(ClientTickEvent.Post.class, event -> clientTickPost());
+        bus.addListener(BlockEvent.NeighborNotifyEvent.class, event -> {
+            if (event.getLevel().isClientSide() && event.getPos().equals(neighborNotifyPos)) neighborNotify = event;
+        });
         bus.addListener(LevelEvent.Load.class, event -> {
             if (event.getLevel() instanceof ClientLevel level) loadedLevel = level;
         });
@@ -241,6 +249,13 @@ final class ClientEvents {
         ((MinecraftAccessor) minecraft).events$startUseItem();
         ((MinecraftAccessor) minecraft).events$startAttack();
         CHECKS.check("RightClickEmpty fires for each empty hand, LeftClickEmpty for an attack at nothing", rightClickEmpty == 2 && leftClickEmpty == 1);
+
+        // NeoForge's Level patch fires NeighborNotifyEvent in the three-argument updateNeighborsAt, which on the client
+        // only pistons call (they move blocks on both sides).
+        neighborNotifyPos = player.blockPosition().above(6);
+        minecraft.level.updateNeighborsAt(neighborNotifyPos, Blocks.STONE, null);
+        CHECKS.check("NeighborNotifyEvent fires for the client level's three-argument updateNeighborsAt, with all six sides",
+                neighborNotify != null && neighborNotify.getLevel() == minecraft.level && neighborNotify.getNotifiedSides().equals(EnumSet.allOf(Direction.class)));
     }
 
     private static void inWorld(Minecraft minecraft) {

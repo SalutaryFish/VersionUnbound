@@ -6,12 +6,14 @@
 package net.neoforged.neoforge.event;
 
 import com.mojang.brigadier.CommandDispatcher;
+import java.util.EnumSet;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -42,12 +44,15 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.SpawnData;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.level.storage.ServerLevelData;
 import net.minecraft.world.phys.HitResult;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.extensions.IOwnedSpawner;
+import net.neoforged.neoforge.event.entity.EntityMobGriefingEvent;
 import net.neoforged.neoforge.event.entity.EntityMountEvent;
 import net.neoforged.neoforge.event.entity.EntityTeleportEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
@@ -65,6 +70,7 @@ import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.level.BlockEvent.NeighborNotifyEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
 import net.neoforged.neoforge.event.level.ChunkWatchEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -79,6 +85,12 @@ import org.jspecify.annotations.Nullable;
 // the others arrive with their events (player, interaction and block events, living and entity events, spawning, items,
 // explosions, loot, chunks, ...). A mod calling a method that isn't here yet gets NoSuchMethodError.
 public class EventHooks {
+    public static NeighborNotifyEvent onNeighborNotify(Level level, BlockPos pos, BlockState state, EnumSet<Direction> notifiedSides, boolean forceRedstoneUpdate) {
+        NeighborNotifyEvent event = new NeighborNotifyEvent(level, pos, state, notifiedSides, forceRedstoneUpdate);
+        NeoForge.EVENT_BUS.post(event);
+        return event;
+    }
+
     public static void onPlayerDestroyItem(Player player, ItemStack stack, @Nullable InteractionHand hand) {
         NeoForge.EVENT_BUS.post(new PlayerDestroyItemEvent(player, stack, hand));
     }
@@ -308,6 +320,23 @@ public class EventHooks {
 
     public static boolean onProjectileImpact(Projectile projectile, HitResult ray) {
         return NeoForge.EVENT_BUS.post(new ProjectileImpactEvent(projectile, ray)).isCanceled();
+    }
+
+    /**
+     * Checks if an entity can perform a griefing action.
+     * <p>
+     * If an entity is provided, this method fires {@link EntityMobGriefingEvent}.
+     * If an entity is not provided, this method returns the value of {@link GameRules#MOB_GRIEFING}.
+     * 
+     * @param level  The level of the action
+     * @param entity The entity performing the action, or null if unknown.
+     * @return
+     */
+    public static boolean canEntityGrief(ServerLevel level, @Nullable Entity entity) {
+        if (entity == null)
+            return level.getGameRules().get(GameRules.MOB_GRIEFING);
+
+        return NeoForge.EVENT_BUS.post(new EntityMobGriefingEvent(level, entity)).canGrief();
     }
 
     public static void fireChunkTicketLevelUpdated(ServerLevel level, long chunkPos, int oldTicketLevel, int newTicketLevel, @Nullable ChunkHolder chunkHolder) {

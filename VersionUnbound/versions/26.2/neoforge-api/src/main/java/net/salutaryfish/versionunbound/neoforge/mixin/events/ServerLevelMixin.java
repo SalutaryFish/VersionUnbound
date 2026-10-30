@@ -2,12 +2,17 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import java.util.EnumSet;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProgressListener;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+import net.minecraft.world.level.redstone.Orientation;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
@@ -20,8 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * NeoForge's patch to {@code ServerLevel}, for the events it fires: entity ticks (cancellable), level saves, and players
- * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}), and
- * {@code onAddedToLevel} once a player or a new entity is added.
+ * joining the level (cancellable; other entities join in {@code PersistentEntitySectionManagerMixin}),
+ * {@code onAddedToLevel} once a player or a new entity is added, and {@code BlockEvent.NeighborNotifyEvent} for neighbor
+ * updates (cancellable only when one side is left out).
  */
 @Mixin(ServerLevel.class)
 abstract class ServerLevelMixin {
@@ -63,5 +69,27 @@ abstract class ServerLevelMixin {
         if (!noSave) {
             NeoForge.EVENT_BUS.post(new LevelEvent.Save((ServerLevel) (Object) this));
         }
+    }
+
+    // VersionUnbound: NeoForge fires the event in the two-argument updateNeighborsAt, which calls this overload. Vanilla
+    // added the overload after 1.21.1, and its levers, buttons, redstone torches, pistons, trapped chests, lecterns,
+    // lightning rods and tripwire hooks call it themselves, so on NeoForge 26.2 their updates fire no event on the
+    // server, though the event is documented to fire for every physics update and NeoForge 1.21.1 fired it for them.
+    // Firing it here covers both, once per call. NeoForge ignores whether the event was canceled, here as well.
+    @Inject(
+            method = "updateNeighborsAt(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/Block;Lnet/minecraft/world/level/redstone/Orientation;)V",
+            at = @At("HEAD"))
+    private void versionunbound$neighborNotify(BlockPos pos, Block sourceBlock, @Nullable Orientation orientation, CallbackInfo ci) {
+        ServerLevel level = (ServerLevel) (Object) this;
+        EventHooks.onNeighborNotify(level, pos, level.getBlockState(pos), EnumSet.allOf(Direction.class), false).isCanceled();
+    }
+
+    @Inject(method = "updateNeighborsAtExceptFromFacing", at = @At("HEAD"), cancellable = true)
+    private void versionunbound$neighborNotifyExceptFromFacing(BlockPos pos, Block blockObject, Direction skipDirection, @Nullable Orientation orientation, CallbackInfo ci) {
+        ServerLevel level = (ServerLevel) (Object) this;
+        EnumSet<Direction> directions = EnumSet.allOf(Direction.class);
+        directions.remove(skipDirection);
+        if (EventHooks.onNeighborNotify(level, pos, level.getBlockState(pos), directions, false).isCanceled())
+            ci.cancel();
     }
 }
