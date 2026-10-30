@@ -8,15 +8,23 @@
   ],
   "mixins": [
     "AbstractHorseInvoker",
+    "AbstractPiglinAccessor",
+    "BreedGoalInvoker",
     "EnderDragonInvoker",
     "EntityAccessor",
     "ExperienceOrbAccessor",
+    "HoglinAccessor",
     "LivingEntityInvoker",
     "MinecartSpawnerAccessor",
+    "MobInvoker",
     "OcelotInvoker",
     "ProjectileInvoker",
     "ShulkerInvoker",
-    "VillagerMakeLoveInvoker"
+    "SkeletonInvoker",
+    "TadpoleInvoker",
+    "VillagerMakeLoveInvoker",
+    "ZombieInvoker",
+    "ZombieVillagerInvoker"
   ],
   "injectors": {
     "defaultRequire": 1

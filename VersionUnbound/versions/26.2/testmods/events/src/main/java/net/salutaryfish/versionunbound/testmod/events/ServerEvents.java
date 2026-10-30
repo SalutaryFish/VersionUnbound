@@ -48,10 +48,12 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
+import net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent;
 import net.neoforged.neoforge.event.entity.living.EffectParticleModificationEvent;
 import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.LivingBreatheEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
+import net.neoforged.neoforge.event.entity.living.LivingConversionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
@@ -140,6 +142,7 @@ final class ServerEvents {
         bus.addListener(EntityJoinLevelEvent.class, event -> {
             if (!event.getLevel().isClientSide()) {
                 session().spawns.joined(event);
+                session().conversions.joined(event);
                 session().entityJoined(event);
             }
         });
@@ -219,6 +222,14 @@ final class ServerEvents {
         bus.addListener(EffectParticleModificationEvent.class, event -> {
             if (!event.getEntity().level().isClientSide()) session().effects.particles(event);
         });
+        // Conversions and births (a tadpole fed on the client fires Pre there too).
+        bus.addListener(LivingConversionEvent.Pre.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().conversions.pre(event);
+        });
+        bus.addListener(LivingConversionEvent.Post.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().conversions.post(event);
+        });
+        bus.addListener(BabyEntitySpawnEvent.class, event -> session().conversions.babySpawn(event));
         bus.addListener(EntityMountEvent.class, event -> {
             if (!event.getLevel().isClientSide()) session().survival.mount(event);
         });
@@ -333,6 +344,7 @@ final class ServerEvents {
         private final SpawnScenario spawns = new SpawnScenario(checks, playerChecks, joins);
         private final TameScenario tames = new TameScenario(playerChecks);
         private final EffectScenario effects = new EffectScenario(checks);
+        private final ConversionScenario conversions = new ConversionScenario(checks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames);
         private final List<String> trace = new CopyOnWriteArrayList<>();
@@ -513,6 +525,7 @@ final class ServerEvents {
             living.run(overworld, 6.5, y, 12.5);
             items.run(overworld, 2.5, y, 12.5);
             effects.run(overworld);
+            conversions.run(overworld, new Vec3(2.5, y, 6.5));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

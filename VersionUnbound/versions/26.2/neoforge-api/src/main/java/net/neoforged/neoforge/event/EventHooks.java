@@ -7,6 +7,7 @@ package net.neoforged.neoforge.event;
 
 import com.mojang.brigadier.CommandDispatcher;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -53,6 +54,7 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
 import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
+import net.neoforged.neoforge.event.entity.living.LivingConversionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
@@ -328,6 +330,14 @@ public class EventHooks {
     public static void onCommandRegister(CommandDispatcher<CommandSourceStack> dispatcher, Commands.CommandSelection environment, CommandBuildContext context) {
         RegisterCommandsEvent event = new RegisterCommandsEvent(dispatcher, environment, context);
         NeoForge.EVENT_BUS.post(event);
+    }
+
+    public static boolean canLivingConvert(LivingEntity entity, EntityType<? extends LivingEntity> outcome, Consumer<Integer> timer) {
+        return !NeoForge.EVENT_BUS.post(new LivingConversionEvent.Pre(entity, outcome, timer)).isCanceled();
+    }
+
+    public static void onLivingConvert(LivingEntity entity, LivingEntity outcome) {
+        NeoForge.EVENT_BUS.post(new LivingConversionEvent.Post(entity, outcome));
     }
 
     public static EntityTeleportEvent.TeleportCommand onEntityTeleportCommand(Entity entity, ServerLevel targetLevel, double targetX, double targetY, double targetZ) {
