@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.TriState;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -40,6 +41,19 @@ public interface BlockStateExtension {
     default boolean isFertile(BlockGetter level, BlockPos pos) {
         BlockState self = (BlockState) this;
         return self.getBlock().isFertile(self, level, pos);
+    }
+
+    /**
+     * Determines if the player can harvest this block, obtaining it's drops when the block is destroyed.
+     *
+     * @param level  The current level
+     * @param pos    The block's current position
+     * @param player The player damaging the block
+     * @return True to spawn the drops
+     */
+    default boolean canHarvestBlock(BlockGetter level, BlockPos pos, Player player) {
+        BlockState self = (BlockState) this;
+        return self.getBlock().canHarvestBlock(self, level, pos, player);
     }
 
     /**

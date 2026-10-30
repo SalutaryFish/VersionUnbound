@@ -3,6 +3,7 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
+import java.util.OptionalInt;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
@@ -11,7 +12,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
+import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -21,8 +25,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * NeoForge's patch to {@code ServerPlayer}, for the events it fires: death (cancellable; the player overrides
  * {@code LivingEntity.die}), travel to dimension (cancellable, at the head of every teleport), changed dimension (at the
- * end of a teleport to another level), clone, and tossing the selected item ({@code ItemTossEvent}, as in
- * {@code PlayerMixin}).
+ * end of a teleport to another level), clone, tossing the selected item ({@code ItemTossEvent}, as in
+ * {@code PlayerMixin}), and {@code PlayerContainerEvent} when a menu opens (also a horse's or nautilus's inventory) or
+ * closes.
  */
 @Mixin(ServerPlayer.class)
 abstract class ServerPlayerMixin {
@@ -60,5 +65,25 @@ abstract class ServerPlayerMixin {
     @WrapOperation(method = "drop(Z)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;drop(Lnet/minecraft/world/item/ItemStack;ZZ)Lnet/minecraft/world/entity/item/ItemEntity;"))
     private ItemEntity versionunbound$tossSelected(ServerPlayer player, ItemStack removed, boolean randomly, boolean thrownFromHand, Operation<ItemEntity> original) {
         return CommonHooks.onPlayerTossEvent(player, removed, randomly, thrownFromHand);
+    }
+
+    // Once the new menu is the player's (NeoForge's extra-data screen packet comes with networking, Phase 2 step 7).
+    @Inject(method = "openMenu", at = @At(value = "FIELD", target = "Lnet/minecraft/server/level/ServerPlayer;containerMenu:Lnet/minecraft/world/inventory/AbstractContainerMenu;", opcode = Opcodes.PUTFIELD, shift = At.Shift.AFTER))
+    private void versionunbound$containerOpen(CallbackInfoReturnable<OptionalInt> cir) {
+        ServerPlayer self = (ServerPlayer) (Object) this;
+        NeoForge.EVENT_BUS.post(new PlayerContainerEvent.Open(self, self.containerMenu));
+    }
+
+    @Inject(method = {"openHorseInventory", "openNautilusInventory"}, at = @At("TAIL"))
+    private void versionunbound$mountContainerOpen(CallbackInfo ci) {
+        ServerPlayer self = (ServerPlayer) (Object) this;
+        NeoForge.EVENT_BUS.post(new PlayerContainerEvent.Open(self, self.containerMenu));
+    }
+
+    // Before the player's menu goes back to the inventory.
+    @Inject(method = "doCloseContainer", at = @At(value = "FIELD", target = "Lnet/minecraft/server/level/ServerPlayer;containerMenu:Lnet/minecraft/world/inventory/AbstractContainerMenu;", opcode = Opcodes.PUTFIELD))
+    private void versionunbound$containerClose(CallbackInfo ci) {
+        ServerPlayer self = (ServerPlayer) (Object) this;
+        NeoForge.EVENT_BUS.post(new PlayerContainerEvent.Close(self, self.containerMenu));
     }
 }

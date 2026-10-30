@@ -1,11 +1,13 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.Share;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionHand;
@@ -15,14 +17,19 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
 import net.neoforged.neoforge.event.EventHooks;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
+import net.salutaryfish.versionunbound.neoforge.patches.PlayerExtension;
+import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -33,10 +40,40 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * the entity tick events), entity interaction and attack (both cancellable, on both sides), and the damage pipeline in
  * the player's own {@code actuallyHurt} (see {@code LivingEntityMixin}), and {@code ItemTossEvent} for items the player
  * drops ({@code CommonHooks.onPlayerTossEvent} drops them through the drop capture), and {@code PlayerDestroyItemEvent}
- * when an entity interaction uses up the held item or an attack breaks the weapon.
+ * when an entity interaction uses up the held item or an attack breaks the weapon, {@code PlayerWakeUpEvent} when
+ * the player leaves a bed (before anything else; {@code ServerPlayer}'s override tells the clients first), and
+ * {@code PlayerEvent.BreakSpeed} on the player's destroy speed, with NeoForge's position-sensitive overloads of
+ * {@code getDestroySpeed} and {@code hasCorrectToolForDrops} ({@link PlayerExtension}).
  */
 @Mixin(Player.class)
-abstract class PlayerMixin {
+abstract class PlayerMixin implements PlayerExtension {
+    // The position getDestroySpeed(BlockState, BlockPos) hands vanilla's getDestroySpeed, for its BreakSpeed event.
+    @Unique
+    private @Nullable BlockPos versionunbound$destroySpeedPos;
+
+    // Neo: NeoForge's overload, which vanilla's (deprecated there) calls with no position. Here vanilla's keeps its body
+    // (other mods' mixins target it) and this one hands it the position.
+    @Override
+    public float getDestroySpeed(BlockState state, @Nullable BlockPos pos) {
+        BlockPos previous = this.versionunbound$destroySpeedPos;
+        this.versionunbound$destroySpeedPos = pos;
+        try {
+            return ((Player) (Object) this).getDestroySpeed(state);
+        } finally {
+            this.versionunbound$destroySpeedPos = previous;
+        }
+    }
+
+    @Override
+    public boolean hasCorrectToolForDrops(BlockState state, Level level, BlockPos pos) {
+        return EventHooks.doPlayerHarvestCheck((Player) (Object) this, state, level, pos);
+    }
+
+    @ModifyReturnValue(method = "getDestroySpeed(Lnet/minecraft/world/level/block/state/BlockState;)F", at = @At("RETURN"))
+    private float versionunbound$breakSpeed(float speed, @Local(argsOnly = true) BlockState state) {
+        return EventHooks.getBreakSpeed((Player) (Object) this, state, speed, this.versionunbound$destroySpeedPos);
+    }
+
     @Inject(method = "tick", at = @At("HEAD"))
     private void versionunbound$playerTickPre(CallbackInfo ci) {
         EventHooks.firePlayerTickPre((Player) (Object) this);
@@ -147,5 +184,10 @@ abstract class PlayerMixin {
 
             // Neo: Now we go back to hurtServer, where we'll update various metadata fields, process the side effects of damage (i.e. killing the entity), and firing LivingDamageEvent.Post
         }
+    }
+
+    @Inject(method = "stopSleepInBed", at = @At("HEAD"))
+    private void versionunbound$wakeUp(boolean forcefulWakeUp, boolean updateLevelList, CallbackInfo ci) {
+        EventHooks.onPlayerWakeup((Player) (Object) this, forcefulWakeUp, updateLevelList);
     }
 }

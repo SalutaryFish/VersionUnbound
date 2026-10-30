@@ -17,7 +17,8 @@ import org.objectweb.asm.tree.VarInsnNode;
  * Mods' {@code invokestatic} calls (also those naming a subclass as the owner) then resolve as on NeoForge.
  * <p>
  * Added so far: {@code CropBlock.getGrowthSpeed(BlockState, BlockGetter, BlockPos)} (KaleidoscopeCookery's rice calls
- * it). Not yet: the ones listed in HANDOFF.md, Known gap 15 ({@code SpawnPlacements.hasPlacement} and
+ * it) and {@code BoneMealItem.applyBonemeal(ItemStack, Level, BlockPos, Player)} (no corpus caller, but mods' fertilizers
+ * commonly call it). Not yet: the ones listed in HANDOFF.md, Known gap 15 ({@code SpawnPlacements.hasPlacement} and
  * {@code fireSpawnPlacementEvent}, {@code RegistryOps.retrieveRegistryLookup},
  * {@code BuiltInRegistries.getVanillaRegistrationOrder}); add a line here and the class to the carrier.
  */
@@ -25,7 +26,10 @@ final class AddedStaticMethods {
     private static final List<AddedStaticMethod> METHODS = List.of(
             new AddedStaticMethod("net/minecraft/world/level/block/CropBlock", Opcodes.ACC_PROTECTED, "getGrowthSpeed",
                     "(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)F",
-                    "net/salutaryfish/versionunbound/neoforge/patches/CropBlockPatch"));
+                    "net/salutaryfish/versionunbound/neoforge/patches/CropBlockPatch"),
+            new AddedStaticMethod("net/minecraft/world/item/BoneMealItem", Opcodes.ACC_PUBLIC, "applyBonemeal",
+                    "(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;)Z",
+                    "net/salutaryfish/versionunbound/neoforge/patches/BoneMealItemPatch"));
 
     private AddedStaticMethods() {}
 

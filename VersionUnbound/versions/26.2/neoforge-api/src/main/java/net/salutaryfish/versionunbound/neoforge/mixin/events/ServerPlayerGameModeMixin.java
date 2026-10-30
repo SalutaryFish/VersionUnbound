@@ -10,6 +10,7 @@ import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerPlayerGameMode;
 import net.minecraft.util.TriState;
@@ -38,12 +39,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * NeoForge's patch to {@code ServerPlayerGameMode}, for the events it fires: left click block (cancellable; its use-block
  * result can skip the block's attack), block break (in place of vanilla's {@code canDestroyBlock} check), the tool
  * breaking ({@code PlayerDestroyItemEvent}), right click item and right click block (cancellable; its use-block and
- * use-item results override vanilla's choices).
+ * use-item results override vanilla's choices), and in {@code destroyBlock} the block state's {@code canHarvestBlock}
+ * (a stand-in for the block extension's, whose default asks {@code PlayerEvent.HarvestCheck}) for the drops.
  *
  * <p>Not yet: the parts of the patch that call extension methods (Phase 2 step 5): {@code onItemUseFirst} and
  * {@code doesSneakBypassUse} in {@code useItemOn}, and in {@code destroyBlock} the removal through
- * {@code onDestroyedByPlayer} after the tool is used and {@code canHarvestBlock}. Vanilla's behavior stands in, which
- * is what the extension methods' defaults do. Nor NeoForge's change to
+ * {@code onDestroyedByPlayer} after the tool is used. Vanilla's behavior stands in, which is what the extension
+ * methods' defaults do. Nor NeoForge's change to
  * {@code setGameModeForPlayer} that keeps a player flying.
  */
 @Mixin(ServerPlayerGameMode.class)
@@ -54,6 +56,9 @@ abstract class ServerPlayerGameModeMixin {
 
     @Shadow
     private GameType gameModeForPlayer;
+
+    @Shadow
+    protected ServerLevel level;
 
     @Inject(method = "handleBlockBreakAction", at = @At("HEAD"), cancellable = true)
     private void versionunbound$leftClickBlock(BlockPos pos, ServerboundPlayerActionPacket.Action action, Direction direction, int maxY, int sequence,
@@ -75,6 +80,13 @@ abstract class ServerPlayerGameModeMixin {
     @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;canDestroyBlock(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;)Z"))
     private boolean versionunbound$breakBlock(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, Operation<Boolean> original) {
         return !CommonHooks.fireBlockBreak(level, this.gameModeForPlayer, player, pos, state).isCanceled();
+    }
+
+    // Neo: the block decides whether the player gets the drops (previously player.hasCorrectToolForDrops(blockstate)); the
+    // block extension's default asks PlayerEvent.HarvestCheck.
+    @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;hasCorrectToolForDrops(Lnet/minecraft/world/level/block/state/BlockState;)Z"))
+    private boolean versionunbound$canHarvestBlock(ServerPlayer player, BlockState adjustedState, Operation<Boolean> original, BlockPos pos) {
+        return adjustedState.canHarvestBlock(this.level, pos, player);
     }
 
     // Neo: Fire the PlayerDestroyItemEvent if the tool was broken at any point during the break process

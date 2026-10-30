@@ -7,16 +7,19 @@ import net.minecraft.util.TriState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.FarmlandBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.event.EventHooks;
 
 /**
  * Methods of NeoForge's {@code IBlockExtension} that its patches already call, injected into {@link Block} by the class
  * tweaker with NeoForge's default bodies; mods' blocks override them (Create's copycat blocks override
- * {@code canEntityDestroy}, Farmer's Delight's rich soil {@code canSustainPlant} and {@code isFertile}). {@link BlockStateExtension} has the block state's side. When the block extension is ported
+ * {@code canEntityDestroy}, Farmer's Delight's rich soil {@code canSustainPlant} and {@code isFertile}; {@code canHarvestBlock}
+ * decides whether a player breaking the block gets its drops). {@link BlockStateExtension} has the block state's side. When the block extension is ported
  * (Phase 2 step 5), it declares the same methods.
  */
 public interface BlockExtension {
@@ -49,6 +52,18 @@ public interface BlockExtension {
             return state.getValue(FarmlandBlock.MOISTURE) > 0;
 
         return false;
+    }
+
+    /**
+     * Determines if the player can harvest this block, obtaining it's drops when the block is destroyed.
+     *
+     * @param level  The current level
+     * @param pos    The block's current position
+     * @param player The player damaging the block
+     * @return True to spawn the drops
+     */
+    default public boolean canHarvestBlock(BlockState state, BlockGetter level, BlockPos pos, Player player) {
+        return EventHooks.doPlayerHarvestCheck(player, state, level, pos);
     }
 
     /**

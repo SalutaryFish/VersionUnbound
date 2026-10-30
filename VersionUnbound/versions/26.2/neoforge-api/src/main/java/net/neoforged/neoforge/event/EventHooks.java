@@ -10,6 +10,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import net.minecraft.advancements.AdvancementHolder;
+import net.minecraft.advancements.AdvancementProgress;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -23,6 +25,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.Container;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffect;
@@ -43,6 +46,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BaseSpawner;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerExplosion;
@@ -73,10 +77,15 @@ import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck;
+import net.neoforged.neoforge.event.entity.player.AdvancementEvent.AdvancementEarnEvent;
+import net.neoforged.neoforge.event.entity.player.AdvancementEvent.AdvancementProgressEvent;
+import net.neoforged.neoforge.event.entity.player.AdvancementEvent.AdvancementProgressEvent.ProgressType;
+import net.neoforged.neoforge.event.entity.player.BonemealEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerWakeUpEvent;
 import net.neoforged.neoforge.event.level.BlockEvent.NeighborNotifyEvent;
 import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
 import net.neoforged.neoforge.event.level.ChunkWatchEvent;
@@ -98,6 +107,18 @@ public class EventHooks {
         NeighborNotifyEvent event = new NeighborNotifyEvent(level, pos, state, notifiedSides, forceRedstoneUpdate);
         NeoForge.EVENT_BUS.post(event);
         return event;
+    }
+
+    public static boolean doPlayerHarvestCheck(Player player, BlockState state, BlockGetter level, BlockPos pos) {
+        // Call deprecated hasCorrectToolForDrops overload for a fallback value, in turn the non-deprecated overload calls this method
+        boolean vanillaValue = player.hasCorrectToolForDrops(state);
+        PlayerEvent.HarvestCheck event = NeoForge.EVENT_BUS.post(new PlayerEvent.HarvestCheck(player, state, level, pos, vanillaValue));
+        return event.canHarvest();
+    }
+
+    public static float getBreakSpeed(Player player, BlockState state, float original, BlockPos pos) {
+        PlayerEvent.BreakSpeed event = new PlayerEvent.BreakSpeed(player, state, original, pos);
+        return (NeoForge.EVENT_BUS.post(event).isCanceled() ? -1 : event.getNewSpeed());
     }
 
     public static void onPlayerDestroyItem(Player player, ItemStack stack, @Nullable InteractionHand hand) {
@@ -269,6 +290,18 @@ public class EventHooks {
         return event.getResultStack();
     }
 
+    public static void onStartEntityTracking(Entity entity, Player player) {
+        NeoForge.EVENT_BUS.post(new PlayerEvent.StartTracking(player, entity));
+    }
+
+    public static void onStopEntityTracking(Entity entity, Player player) {
+        NeoForge.EVENT_BUS.post(new PlayerEvent.StopTracking(player, entity));
+    }
+
+    public static BonemealEvent fireBonemealEvent(@Nullable Player player, Level level, BlockPos pos, BlockState state, ItemStack stack) {
+        return NeoForge.EVENT_BUS.post(new BonemealEvent(player, level, pos, state, stack));
+    }
+
     public static int onItemExpire(ItemEntity entity) {
         ItemExpireEvent event = new ItemExpireEvent(entity);
         NeoForge.EVENT_BUS.post(event);
@@ -312,6 +345,10 @@ public class EventHooks {
 
     public static boolean onAnimalTame(Animal animal, Player tamer) {
         return NeoForge.EVENT_BUS.post(new AnimalTameEvent(animal, tamer)).isCanceled();
+    }
+
+    public static void onPlayerWakeup(Player player, boolean wakeImmediately, boolean updateLevel) {
+        NeoForge.EVENT_BUS.post(new PlayerWakeUpEvent(player, wakeImmediately, updateLevel));
     }
 
     public static void onPlayerClone(Player player, Player oldPlayer, boolean wasDeath) {
@@ -503,6 +540,14 @@ public class EventHooks {
      * @param entity The entity being ticked
      * @return The event
      */
+    public static void firePlayerCraftingEvent(Player player, ItemStack crafted, Container craftMatrix) {
+        NeoForge.EVENT_BUS.post(new PlayerEvent.ItemCraftedEvent(player, crafted, craftMatrix));
+    }
+
+    public static void firePlayerSmeltedEvent(Player player, ItemStack smelted, int amountRemoved) {
+        NeoForge.EVENT_BUS.post(new PlayerEvent.ItemSmeltedEvent(player, smelted, amountRemoved));
+    }
+
     public static EntityTickEvent.Pre fireEntityTickPre(Entity entity) {
         return NeoForge.EVENT_BUS.post(new EntityTickEvent.Pre(entity));
     }
@@ -572,6 +617,14 @@ public class EventHooks {
      */
     public static void fireServerTickPost(BooleanSupplier haveTime, MinecraftServer server) {
         NeoForge.EVENT_BUS.post(new ServerTickEvent.Post(haveTime, server));
+    }
+
+    public static void onAdvancementEarnedEvent(Player player, AdvancementHolder earned) {
+        NeoForge.EVENT_BUS.post(new AdvancementEarnEvent(player, earned));
+    }
+
+    public static void onAdvancementProgressedEvent(Player player, AdvancementHolder progressed, AdvancementProgress advancementProgress, String criterion, ProgressType progressType) {
+        NeoForge.EVENT_BUS.post(new AdvancementProgressEvent(player, progressed, advancementProgress, criterion, progressType));
     }
 
     public static boolean onEffectRemoved(LivingEntity entity, Holder<MobEffect> effect) {

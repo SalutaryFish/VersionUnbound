@@ -71,12 +71,16 @@ import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
 import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
+import net.neoforged.neoforge.event.entity.player.AdvancementEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.BonemealEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerWakeUpEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -266,6 +270,19 @@ final class ServerEvents {
         bus.addListener(ExplosionKnockbackEvent.class, event -> session().levelEvents.explosionKnockback(event));
         bus.addListener(NoteBlockEvent.Play.class, event -> session().levelEvents.notePlay(event));
         bus.addListener(NoteBlockEvent.Change.class, event -> session().levelEvents.noteChange(event));
+        // Player events (PlayerEventScenario), all fired on the server.
+        bus.addListener(PlayerContainerEvent.Open.class, event -> session().playerEvents.containerOpen(event));
+        bus.addListener(PlayerContainerEvent.Close.class, event -> session().playerEvents.containerClose(event));
+        bus.addListener(PlayerEvent.ItemCraftedEvent.class, event -> session().playerEvents.itemCrafted(event));
+        bus.addListener(PlayerEvent.ItemSmeltedEvent.class, event -> session().playerEvents.itemSmelted(event));
+        bus.addListener(AdvancementEvent.AdvancementEarnEvent.class, event -> session().playerEvents.advancementEarn(event));
+        bus.addListener(AdvancementEvent.AdvancementProgressEvent.class, event -> session().playerEvents.advancementProgress(event));
+        bus.addListener(PlayerWakeUpEvent.class, event -> session().playerEvents.wakeUp(event));
+        bus.addListener(PlayerEvent.StartTracking.class, event -> session().playerEvents.startTracking(event));
+        bus.addListener(PlayerEvent.StopTracking.class, event -> session().playerEvents.stopTracking(event));
+        bus.addListener(PlayerEvent.BreakSpeed.class, event -> session().playerEvents.breakSpeed(event));
+        bus.addListener(PlayerEvent.HarvestCheck.class, event -> session().playerEvents.harvestCheck(event));
+        bus.addListener(BonemealEvent.class, event -> session().playerEvents.bonemeal(event));
         // Crop growth fires only on the server.
         bus.addListener(CropGrowEvent.Pre.class, event -> session().crops.pre(event));
         bus.addListener(CropGrowEvent.Post.class, event -> session().crops.post(event));
@@ -386,8 +403,9 @@ final class ServerEvents {
         private final CropScenario crops = new CropScenario(checks);
         private final EntityScenario entities = new EntityScenario(checks);
         private final LevelScenario levelEvents = new LevelScenario(checks, playerChecks);
+        private final PlayerEventScenario playerEvents = new PlayerEventScenario(playerChecks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
-                tames, blocks, levelEvents);
+                tames, blocks, levelEvents, playerEvents);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -601,6 +619,7 @@ final class ServerEvents {
             } else {
                 serverTicksPost++;
                 levelEvents.tick();
+                playerEvents.tick();
                 if (serverTicksPre != serverTicksPost) serverTicksAlternate = false;
                 // Once the forced chunk's entities are visible (to projectiles' hit checks), a few ticks after server
                 // started, or more in a new world. Far below the entities spawned at server started, which fall.
@@ -654,6 +673,7 @@ final class ServerEvents {
         void stopping(ServerStoppingEvent event) {
             trace("stopping");
             levelEvents.stopping();
+            playerEvents.stopping();
             checks.check("server ticks fired, Pre and Post in turn", serverTicksPre > 0 && serverTicksAlternate && serverTicksPre == serverTicksPost);
             checks.check("server tick events carry the server and its time budget", serverTickServer && serverTickHasTime);
             int[] overworldTicks = levelTicks.getOrDefault(Level.OVERWORLD, new int[2]);

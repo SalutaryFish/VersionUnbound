@@ -215,6 +215,17 @@ public class CommonHooks {
         return event;
     }
 
+    private static final ThreadLocal<@Nullable Player> craftingPlayer = new ThreadLocal<>();
+
+    public static void setCraftingPlayer(@Nullable Player player) {
+        craftingPlayer.set(player);
+    }
+
+    @Nullable
+    public static Player getCraftingPlayer() {
+        return craftingPlayer.get();
+    }
+
     public static boolean onPlayerAttackTarget(Player player, Entity target) {
         if (NeoForge.EVENT_BUS.post(new AttackEntityEvent(player, target)).isCanceled())
             return false;
