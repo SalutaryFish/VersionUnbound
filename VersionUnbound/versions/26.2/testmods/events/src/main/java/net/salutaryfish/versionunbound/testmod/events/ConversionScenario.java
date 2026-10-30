@@ -64,11 +64,15 @@ import org.jspecify.annotations.Nullable;
  * {@code setConversionTimer} sets it), and where the outcome shows it, the checks see where in the conversion
  * {@code Post} fires. {@code BabyEntitySpawnEvent} for two cows breeding (the child as is, replaced, and canceled) and
  * for two foxes, which have their own breed goal. The old mobs and parents aren't added to the level; whatever joins it
- * while the scenario runs (the outcomes, children, experience orbs and the mooshroom's mushrooms) goes again at the end.
+ * near them while the scenario runs (the outcomes, children, experience orbs and the mooshroom's mushrooms) goes again
+ * at the end.
  * Runs on hard difficulty (zombies only convert villagers on normal and hard, and always on hard), which is put back
  * afterwards. The listeners only look at the scenario's own mobs.
  */
 final class ConversionScenario {
+    // How far from the scenario's spot a joining entity counts as one of its own.
+    private static final double NEAR = 16.0;
+
     private final Checks checks;
     private final Set<Entity> tracked = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
     // Each mob's conversion events, in order, as the records below.
@@ -115,8 +119,11 @@ final class ConversionScenario {
         if (canceledBirths.contains(event.getParentA())) event.setCanceled(true);
     }
 
+    // Only near the scenario's spot: on a brand-new world the chunks around the forced one are still being generated at
+    // server started, a mob's tick here can finish them (a zombie's turtle egg goal reads blocks 24 out, and waits for
+    // chunks that are on their way), and their worldgen entities join the level far below.
     void joined(EntityJoinLevelEvent event) {
-        if (active) joined.add(event.getEntity());
+        if (active && event.getEntity().position().closerThan(position, NEAR)) joined.add(event.getEntity());
     }
 
     /** Runs at {@code position}, in a loaded chunk. */

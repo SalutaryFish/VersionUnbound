@@ -87,14 +87,16 @@ import net.salutaryfish.versionunbound.testmod.events.mixin.WitherBossAccessor;
  * {@code LivingDestroyBlockEvent} with the block extension's {@code canEntityDestroy} (which {@link MobProofBlock}
  * overrides, as mods do). On the server at server started, in the air in a loaded chunk; each site runs through vanilla's
  * own method, once for a mob the listener lets grief and once for one it doesn't (or, where the outcome depends on a
- * roll, only the second). Mobs and projectiles aren't added to the level; what joins it while the scenario runs (drops)
- * is discarded, and the scenario's box is put back as it was. The listeners only record the scenario's own entities.
+ * roll, only the second). Mobs and projectiles aren't added to the level; what joins it near the scenario's box while the
+ * scenario runs (drops) is discarded, and the box is put back as it was. The listeners only record the scenario's own
+ * entities.
  */
 final class GriefingScenario {
     private final Checks checks;
     private final List<Entity> griefing = new CopyOnWriteArrayList<>();
     private final List<Destroy> destroys = new CopyOnWriteArrayList<>();
     private final List<Entity> joined = new CopyOnWriteArrayList<>();
+    private volatile BoundingBox joinArea;
     private final Set<Entity> tracked = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
     private final Set<Entity> denied = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
     private final Set<BlockPos> canceledDestroys = Collections.synchronizedSet(new HashSet<>());
@@ -119,8 +121,11 @@ final class GriefingScenario {
         if (canceledDestroys.contains(event.getPos())) event.setCanceled(true);
     }
 
+    // Only near the scenario's box (see ConversionScenario.joined: on a brand-new world, worldgen entities of the chunks
+    // around can join while it runs).
     void joined(EntityJoinLevelEvent event) {
-        if (active) joined.add(event.getEntity());
+        BoundingBox near = joinArea;
+        if (active && near != null && near.isInside(event.getEntity().blockPosition())) joined.add(event.getEntity());
     }
 
     /** Runs around {@code center}, the middle of a loaded chunk, in the air. */
@@ -128,6 +133,7 @@ final class GriefingScenario {
         this.level = level;
         this.center = center;
         BoundingBox box = BoundingBox.fromCorners(center.offset(-8, -2, -8), center.offset(7, 4, 7));
+        joinArea = box.inflatedBy(8);
         Map<BlockPos, BlockState> before = new HashMap<>();
         BlockPos.betweenClosedStream(box).forEach(pos -> before.put(pos.immutable(), level.getBlockState(pos)));
         active = true;
