@@ -2,6 +2,7 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -10,15 +11,22 @@ import java.util.Collection;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
+import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityExtension;
 import org.jspecify.annotations.Nullable;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -32,7 +40,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * gets vanilla's answer and decides, {@code EntityTravelToDimensionEvent} for every teleport (cancellable),
  * {@code EntityMountEvent} when an entity starts or stops riding (cancellable), and the flag behind
  * {@code isAddedToLevel} ({@link EntityExtension}), with which a server entity that a level tracks loads the chunk it
- * moves into.
+ * moves into. And {@code EntityEvent.Size} (in the constructor and whenever the dimensions are refreshed) and
+ * {@code EntityEvent.EntityConstructing} (at the end of the constructor).
  */
 @Mixin(Entity.class)
 abstract class EntityMixin implements EntityDropsCapture, EntityExtension.AddedToLevel {
@@ -47,6 +56,9 @@ abstract class EntityMixin implements EntityDropsCapture, EntityExtension.AddedT
      */
     @Unique
     private boolean versionunbound$isAddedToLevel;
+
+    @Shadow
+    private EntityDimensions dimensions;
 
     @Override
     public boolean versionunbound$isAddedToLevel() {
@@ -68,6 +80,24 @@ abstract class EntityMixin implements EntityDropsCapture, EntityExtension.AddedT
         Collection<ItemEntity> ret = this.versionunbound$captureDrops;
         this.versionunbound$captureDrops = value;
         return ret;
+    }
+
+    // Before vanilla reads the dimensions for the eye height, the constructor's only read of the field.
+    @Inject(method = "<init>", at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/Entity;dimensions:Lnet/minecraft/world/entity/EntityDimensions;", opcode = Opcodes.GETFIELD))
+    private void versionunbound$initialSize(EntityType<?> type, Level level, CallbackInfo ci) {
+        EntityEvent.Size sizeEvent = EventHooks.getEntitySizeForge((Entity) (Object) this, Pose.STANDING, this.dimensions);
+        this.dimensions = sizeEvent.getNewSize();
+    }
+
+    @Inject(method = "<init>", at = @At("TAIL"))
+    private void versionunbound$entityConstructing(EntityType<?> type, Level level, CallbackInfo ci) {
+        NeoForge.EVENT_BUS.post(new EntityEvent.EntityConstructing((Entity) (Object) this));
+    }
+
+    @ModifyExpressionValue(method = "refreshDimensions", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;getDimensions(Lnet/minecraft/world/entity/Pose;)Lnet/minecraft/world/entity/EntityDimensions;"))
+    private EntityDimensions versionunbound$size(EntityDimensions newDim, @Local(ordinal = 0) EntityDimensions oldDim, @Local Pose pose) {
+        EntityEvent.Size sizeEvent = EventHooks.getEntitySizeForge((Entity) (Object) this, pose, oldDim, newDim);
+        return sizeEvent.getNewSize();
     }
 
     // Neo: Permit cancellation of Entity#tick via EntityTickEvent.Pre

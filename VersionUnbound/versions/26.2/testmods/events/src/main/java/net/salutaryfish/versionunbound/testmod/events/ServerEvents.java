@@ -38,6 +38,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.CommandEvent;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -248,6 +249,14 @@ final class ServerEvents {
             session().griefing.mobGriefing(event);
         });
         bus.addListener(LivingDestroyBlockEvent.class, event -> session().griefing.destroyBlock(event));
+        // Size and EntityConstructing also fire on the client (ClientEvents checks the local player's), visibility only
+        // where a mob looks for a target.
+        bus.addListener(EntityEvent.Size.class, event -> session().entities.size(event));
+        bus.addListener(EntityEvent.EntityConstructing.class, event -> {
+            session().entities.constructing(event);
+            session().players.constructing(event);
+        });
+        bus.addListener(LivingEvent.LivingVisibilityEvent.class, event -> session().entities.visibility(event));
         // Crop growth fires only on the server.
         bus.addListener(CropGrowEvent.Pre.class, event -> session().crops.pre(event));
         bus.addListener(CropGrowEvent.Post.class, event -> session().crops.post(event));
@@ -366,6 +375,7 @@ final class ServerEvents {
         private final BlockScenario blocks = new BlockScenario(checks, playerChecks);
         private final GriefingScenario griefing = new GriefingScenario(checks);
         private final CropScenario crops = new CropScenario(checks);
+        private final EntityScenario entities = new EntityScenario(checks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames, blocks);
         private final List<String> trace = new CopyOnWriteArrayList<>();
@@ -550,6 +560,7 @@ final class ServerEvents {
             blocks.run(overworld, BlockPos.containing(8, y - 24, 8));
             griefing.run(overworld, BlockPos.containing(8, y - 36, 8));
             crops.run(overworld, BlockPos.containing(8, y - 48, 8));
+            entities.run(overworld);
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

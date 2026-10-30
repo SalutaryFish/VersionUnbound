@@ -25,6 +25,7 @@ import net.neoforged.fml.LogicalSide;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
@@ -85,6 +86,8 @@ final class ClientEvents {
     private static BlockPos neighborNotifyPos;
     private static BlockEvent.NeighborNotifyEvent neighborNotify;
 
+    private static final Set<LocalPlayer> sizedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
+    private static final Set<LocalPlayer> constructedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> joinedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> leftPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static int ticksInLevel;
@@ -140,6 +143,13 @@ final class ClientEvents {
             if (event.getEntity() instanceof LocalPlayer) localPlayerTicksPost++;
         });
 
+        // Both fire in Entity's constructor, so the object already is a LocalPlayer.
+        bus.addListener(EntityEvent.Size.class, event -> {
+            if (event.getEntity() instanceof LocalPlayer player) sizedPlayers.add(player);
+        });
+        bus.addListener(EntityEvent.EntityConstructing.class, event -> {
+            if (event.getEntity() instanceof LocalPlayer player && sizedPlayers.contains(player)) constructedPlayers.add(player);
+        });
         bus.addListener(EntityJoinLevelEvent.class, event -> {
             if (event.getLevel().isClientSide() && event.getEntity() instanceof LocalPlayer player) joinedPlayers.add(player);
         });
@@ -271,6 +281,7 @@ final class ClientEvents {
                 clone != null && clone.getOldPlayer() != clone.getNewPlayer() && clone.getNewPlayer() == minecraft.player);
         CHECKS.check("the local player joined the client level, and the old one left it on the respawn",
                 joinedPlayers.contains(minecraft.player) && clone != null && leftPlayers.contains(clone.getOldPlayer()));
+        CHECKS.check("EntityEvent.Size and EntityConstructing fired on the client for the local player, in that order", constructedPlayers.contains(minecraft.player));
 
         CHECKS.check("ChunkEvent.Load fires for the chunks the server sends, never as new chunks", chunkLoads > 0 && chunkLoadsConsistent);
         // A chunk two chunks east of the player, dropped as ClientboundForgetLevelChunkPacket's handler does.

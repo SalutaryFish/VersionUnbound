@@ -4,6 +4,7 @@ import com.google.common.base.Preconditions;
 import com.llamalad7.mixinextras.expression.Definition;
 import com.llamalad7.mixinextras.expression.Expression;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -82,7 +83,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * {@code CommonHooks.onLivingBreathe}) and {@code LivingExperienceDropEvent}. And mob effects: {@code MobEffectEvent}
  * ({@code Applicable} in place of {@code canBeAffected} when adding, also forced; {@code Added}; {@code Remove} for one
  * effect or all, cancelable for each; {@code Expired}, cancelable) and {@code EffectParticleModificationEvent}. And
- * {@code EntityMobGriefingEvent} for a wither before its victim leaves a wither rose.
+ * {@code EntityMobGriefingEvent} for a wither before its victim leaves a wither rose, and
+ * {@code LivingVisibilityEvent} on the visibility vanilla works out for a mob looking for a target.
  *
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
@@ -372,6 +374,11 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
     @Inject(method = "jumpFromGround", at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/LivingEntity;needsSync:Z", opcode = Opcodes.PUTFIELD, shift = At.Shift.AFTER))
     private void versionunbound$livingJump(CallbackInfo ci) {
         CommonHooks.onLivingJump((LivingEntity) (Object) this);
+    }
+
+    @ModifyReturnValue(method = "getVisibilityPercent", at = @At("RETURN"))
+    private double versionunbound$visibility(double visibilityPercent, @Local(argsOnly = true) @Nullable Entity targetingEntity) {
+        return CommonHooks.getEntityVisibilityMultiplier((LivingEntity) (Object) this, targetingEntity, visibilityPercent);
     }
 
     // Neo: Fire the LivingDeathEvent after validating that the entity isn't already dead, but before trying to kill it.

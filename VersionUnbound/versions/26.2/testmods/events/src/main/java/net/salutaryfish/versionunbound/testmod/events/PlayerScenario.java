@@ -2,8 +2,11 @@ package net.salutaryfish.versionunbound.testmod.events;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
@@ -31,6 +34,7 @@ import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityTravelToDimensionEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
@@ -69,6 +73,7 @@ final class PlayerScenario {
     private int ticksUntilRun = -1;
 
     private int loggedIn;
+    private final Set<ServerPlayer> constructed = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
     private int loggedOut;
     private Player loggedOutPlayer;
 
@@ -131,6 +136,10 @@ final class PlayerScenario {
             player = serverPlayer;
             ticksUntilRun = DELAY;
         }
+    }
+
+    void constructing(EntityEvent.EntityConstructing event) {
+        if (event.getEntity() instanceof ServerPlayer serverPlayer) constructed.add(serverPlayer);
     }
 
     void loggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
@@ -432,9 +441,13 @@ final class PlayerScenario {
         return entity;
     }
 
-    /** Checks made when the server stops: the player logged in once and logged out (the latest player object) once. */
+    /**
+     * Checks made when the server stops: the player logged in once (constructed with {@code EntityConstructing}) and
+     * logged out (the latest player object) once.
+     */
     void finish() {
         checks.check("PlayerLoggedInEvent fired once", loggedIn, 1);
+        checks.check("EntityEvent.EntityConstructing fired for the player that logged in", constructed.contains(player));
         checks.check("the scenario ran", player != null && ticksUntilRun == 0);
         checks.check("PlayerLoggedOutEvent fired once, for the current player", loggedOut == 1 && loggedOutPlayer == player);
     }

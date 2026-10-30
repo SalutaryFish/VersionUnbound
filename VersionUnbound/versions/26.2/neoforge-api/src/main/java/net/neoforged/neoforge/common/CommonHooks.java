@@ -145,6 +145,12 @@ public class CommonHooks {
         return NeoForge.EVENT_BUS.post(event);
     }
 
+    public static double getEntityVisibilityMultiplier(LivingEntity entity, Entity lookingEntity, double originalMultiplier) {
+        LivingEvent.LivingVisibilityEvent event = new LivingEvent.LivingVisibilityEvent(entity, lookingEntity, originalMultiplier);
+        NeoForge.EVENT_BUS.post(event);
+        return Math.max(0, event.getVisibilityModifier());
+    }
+
     public static void onLivingJump(LivingEntity entity) {
         NeoForge.EVENT_BUS.post(new LivingEvent.LivingJumpEvent(entity));
     }
