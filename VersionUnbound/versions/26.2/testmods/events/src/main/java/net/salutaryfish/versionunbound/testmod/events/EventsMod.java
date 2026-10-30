@@ -20,6 +20,7 @@ public class EventsMod {
     static final DeferredItem<VanishingItem> VANISHING_ITEM = ITEMS.registerItem("vanishing_item", VanishingItem::new);
     private static final DeferredRegister.Blocks BLOCKS = DeferredRegister.createBlocks(MOD_ID);
     static final DeferredBlock<MobProofBlock> MOB_PROOF_BLOCK = BLOCKS.registerBlock("mob_proof_block", MobProofBlock::new);
+    static final DeferredBlock<FertileSoilBlock> FERTILE_SOIL = BLOCKS.registerBlock("fertile_soil", FertileSoilBlock::new);
 
     public EventsMod(IEventBus modBus, ModContainer container, Dist dist) {
         ITEMS.register(modBus);

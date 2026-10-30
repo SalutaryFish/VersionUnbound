@@ -63,6 +63,7 @@ import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
+import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.AttributeSupplierBuilderExtension;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import org.jspecify.annotations.Nullable;
@@ -261,6 +262,25 @@ public class CommonHooks {
 
     public static void onEmptyLeftClick(Player player) {
         NeoForge.EVENT_BUS.post(new PlayerInteractEvent.LeftClickEmpty(player));
+    }
+
+    /**
+     * Checks if a crop can grow by firing {@link CropGrowEvent.Pre}.
+     *
+     * @param level The level the crop is in
+     * @param pos   The position of the crop
+     * @param state The state of the crop
+     * @param def   The result of the default checks performed by the crop.
+     * @return true if the crop can grow
+     */
+    public static boolean canCropGrow(Level level, BlockPos pos, BlockState state, boolean def) {
+        var ev = new CropGrowEvent.Pre(level, pos, state);
+        NeoForge.EVENT_BUS.post(ev);
+        return (ev.getResult() == CropGrowEvent.Pre.Result.GROW || (ev.getResult() == CropGrowEvent.Pre.Result.DEFAULT && def));
+    }
+
+    public static void fireCropGrowPost(Level level, BlockPos pos, BlockState state) {
+        NeoForge.EVENT_BUS.post(new CropGrowEvent.Post(level, pos, state, level.getBlockState(pos)));
     }
 
     public static boolean onFarmlandTrample(ServerLevel level, BlockPos pos, BlockState state, double fallDistance, Entity entity) {

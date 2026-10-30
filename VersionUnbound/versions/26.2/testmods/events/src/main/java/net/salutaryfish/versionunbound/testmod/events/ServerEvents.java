@@ -83,6 +83,7 @@ import net.neoforged.neoforge.event.level.ChunkTicketLevelUpdatedEvent;
 import net.neoforged.neoforge.event.level.ChunkWatchEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
+import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
@@ -247,6 +248,9 @@ final class ServerEvents {
             session().griefing.mobGriefing(event);
         });
         bus.addListener(LivingDestroyBlockEvent.class, event -> session().griefing.destroyBlock(event));
+        // Crop growth fires only on the server.
+        bus.addListener(CropGrowEvent.Pre.class, event -> session().crops.pre(event));
+        bus.addListener(CropGrowEvent.Post.class, event -> session().crops.post(event));
         // Teleport events fire only on the server.
         for (Class<? extends EntityTeleportEvent> kind : List.of(EntityTeleportEvent.TeleportCommand.class, EntityTeleportEvent.SpreadPlayersCommand.class,
                 EntityTeleportEvent.EnderEntity.class, EntityTeleportEvent.EnderPearl.class, EntityTeleportEvent.ItemConsumption.class)) {
@@ -361,6 +365,7 @@ final class ServerEvents {
         private final ConversionScenario conversions = new ConversionScenario(checks);
         private final BlockScenario blocks = new BlockScenario(checks, playerChecks);
         private final GriefingScenario griefing = new GriefingScenario(checks);
+        private final CropScenario crops = new CropScenario(checks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames, blocks);
         private final List<String> trace = new CopyOnWriteArrayList<>();
@@ -544,6 +549,7 @@ final class ServerEvents {
             conversions.run(overworld, new Vec3(2.5, y, 6.5));
             blocks.run(overworld, BlockPos.containing(8, y - 24, 8));
             griefing.run(overworld, BlockPos.containing(8, y - 36, 8));
+            crops.run(overworld, BlockPos.containing(8, y - 48, 8));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

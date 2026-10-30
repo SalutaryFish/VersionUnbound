@@ -21,15 +21,26 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
  * Ported so far: {@link MethodRedirector} (vanilla's {@code Mob.finalizeSpawn} calls). Not ported: the two field
  * coremods ({@code ReplaceFieldWithGetterAccess}, {@code ReplaceFieldComparisonWithInstanceOf}), which belong to
  * features that aren't ported yet.
+ * <p>
+ * The same way, not a coremod of NeoForge's: the static methods NeoForge's patches add to vanilla classes
+ * ({@link AddedStaticMethods}, carrier {@code AddedStaticMethodsTargetsMixin}), which a mixin can't add.
  */
 public final class CoremodMixinPlugin implements IMixinConfigPlugin {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private static final Map<String, List<MethodRedirector.MethodRedirection>> REDIRECTIONS_BY_CARRIER = Map.of(
             "net.salutaryfish.versionunbound.neoforge.mixin.coremods.FinalizeSpawnTargetsMixin", MethodRedirector.REDIRECTIONS);
+    private static final String ADDED_STATIC_METHODS_CARRIER = "net.salutaryfish.versionunbound.neoforge.mixin.coremods.AddedStaticMethodsTargetsMixin";
 
     @Override
     public void preApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) {
+        if (mixinClassName.equals(ADDED_STATIC_METHODS_CARRIER)) {
+            // Every target gets at least one method, so none means the lists in the carrier and AddedStaticMethods differ.
+            if (AddedStaticMethods.add(targetClass) == 0) {
+                LOGGER.warn("Added no static method to {} for {}", targetClassName, mixinClassName);
+            }
+            return;
+        }
         var redirections = REDIRECTIONS_BY_CARRIER.get(mixinClassName);
         if (redirections == null) {
             return;
