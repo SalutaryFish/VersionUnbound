@@ -36,3 +36,5 @@ accessible	method	net/minecraft/world/entity/SpawnPlacements$Data	<init>	(Lnet/m
 
 # NeoForge's access transformers, as each is needed (step 5 converts the rest).
 accessible	method	net/minecraft/world/entity/LivingEntity	shouldTakeDrowningDamage	()Z
+accessible	method	net/minecraft/world/item/context/UseOnContext	<init>	(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/phys/BlockHitResult;)V
+accessible	method	net/minecraft/world/item/context/BlockPlaceContext	<init>	(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/phys/BlockHitResult;)V

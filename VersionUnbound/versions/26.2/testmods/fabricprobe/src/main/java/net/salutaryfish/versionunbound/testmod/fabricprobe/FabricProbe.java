@@ -2,15 +2,19 @@ package net.salutaryfish.versionunbound.testmod.fabricprobe;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.effect.ServerMobEffectEvents;
+import net.fabricmc.fabric.api.event.player.ItemEvents;
 import net.fabricmc.fabric.api.event.registry.RegistryAttribute;
 import net.fabricmc.fabric.api.event.registry.RegistryAttributeHolder;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.object.builder.v1.world.poi.PoiHelper;
 import net.minecraft.core.Registry;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
@@ -28,7 +32,7 @@ import org.slf4j.LoggerFactory;
  * Sets system properties when Fabric runs its mods' initializers, for NeoForge testmods to read: they can't see Fabric
  * mods. The lifecycle testmod checks whether its loading steps ran before or after; the registries testmod checks what
  * Fabric mods see of NeoForge mods' registrations, which by now are done, and that Fabric mods can still register. The
- * events testmod tags entities for the mob effect listeners here.
+ * events testmod tags entities for the mob effect listeners here, and names item stacks for the item use listener.
  */
 public class FabricProbe implements ModInitializer {
     private static final String PREFIX = "versionunbound.testprobe.";
@@ -41,6 +45,7 @@ public class FabricProbe implements ModInitializer {
         probeRegistries();
         probeEntities();
         probeEffects();
+        probeItemUse();
     }
 
     private static void probeRegistries() {
@@ -96,5 +101,17 @@ public class FabricProbe implements ModInitializer {
         ServerMobEffectEvents.ALLOW_ADD.register((effect, entity, context) -> !entity.entityTags().contains("versionunbound_fabric_refuses_effects"));
         ServerMobEffectEvents.ALLOW_EARLY_REMOVE.register((effect, entity, context) ->
                 !(entity.entityTags().contains("versionunbound_fabric_keeps_regeneration") && effect.is(MobEffects.REGENERATION)));
+    }
+
+    /**
+     * Fabric API's item use event on a block, which wraps the same {@code Item.useOn} call in {@code ItemStack.useOn} as
+     * Layer A's block placement does, for the events testmod's placement checks: a stack with this name can't be used on
+     * a block.
+     */
+    private static void probeItemUse() {
+        ItemEvents.USE_ON.register(context -> {
+            Component name = context.getItemInHand().get(DataComponents.CUSTOM_NAME);
+            return name != null && name.getString().equals("versionunbound_fabric_refuses_use_on") ? InteractionResult.FAIL : null;
+        });
     }
 }

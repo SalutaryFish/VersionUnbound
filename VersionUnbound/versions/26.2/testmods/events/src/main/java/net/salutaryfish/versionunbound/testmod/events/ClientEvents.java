@@ -3,7 +3,9 @@ package net.salutaryfish.versionunbound.testmod.events;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -14,6 +16,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -30,6 +33,7 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -87,6 +91,8 @@ final class ClientEvents {
     private static BlockPos neighborNotifyPos;
     private static BlockEvent.NeighborNotifyEvent neighborNotify;
     private static int notesPlayed;
+    private static BlockPos useItemOnBlockPos;
+    private static final List<UseItemOnBlockEvent.UsePhase> useItemOnBlockPhases = new CopyOnWriteArrayList<>();
 
     private static final Set<LocalPlayer> sizedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> constructedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -201,6 +207,13 @@ final class ClientEvents {
         bus.addListener(PlayerDestroyItemEvent.class, event -> {
             if (event.getEntity().level().isClientSide()) destroyedItem = event;
         });
+        // Its ITEM_AFTER_BLOCK phase, which Create Aeronautics' Simulated listens to on the client, is canceled so that the
+        // client places nothing the server doesn't.
+        bus.addListener(UseItemOnBlockEvent.class, event -> {
+            if (!event.getLevel().isClientSide() || !event.getPos().equals(useItemOnBlockPos)) return;
+            useItemOnBlockPhases.add(event.getUsePhase());
+            if (event.getUsePhase() == UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK) event.cancelWithResult(InteractionResult.FAIL);
+        });
         bus.addListener(PlayerInteractEvent.RightClickEmpty.class, event -> rightClickEmpty++);
         bus.addListener(PlayerInteractEvent.LeftClickEmpty.class, event -> leftClickEmpty++);
     }
@@ -251,6 +264,16 @@ final class ClientEvents {
         CHECKS.check("PlayerDestroyItemEvent fires on the client when using an item leaves the hand empty",
                 destroyedItem != null && destroyedItem.getEntity() == player && destroyedItem.getHand() == InteractionHand.MAIN_HAND
                         && destroyedItem.getOriginal().is(EventsMod.VANISHING_ITEM.get()) && player.getMainHandItem().isEmpty());
+
+        // A block item used on the ground, in the hand on the client only: UseItemOnBlockEvent for the block, then for the item.
+        player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STONE));
+        useItemOnBlockPos = ground;
+        InteractionResult refusedUse = gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
+        useItemOnBlockPos = null;
+        player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        CHECKS.check("UseItemOnBlockEvent fires on the client for the block, then for the item", useItemOnBlockPhases,
+                List.of(UseItemOnBlockEvent.UsePhase.BLOCK, UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK));
+        CHECKS.check("canceling UseItemOnBlockEvent on the client returns its cancellation result", refusedUse, InteractionResult.FAIL);
 
         gameMode.startDestroyBlock(ground, Direction.UP);
         gameMode.stopDestroyBlock();

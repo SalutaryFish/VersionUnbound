@@ -81,6 +81,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerWakeUpEvent;
+import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
@@ -156,6 +157,7 @@ final class ServerEvents {
                 session().spawns.joined(event);
                 session().conversions.joined(event);
                 session().griefing.joined(event);
+                session().placements.joined(event);
                 session().entityJoined(event);
             }
         });
@@ -206,7 +208,9 @@ final class ServerEvents {
             if (!event.getEntity().level().isClientSide()) session().living.jump(event);
         });
         bus.addListener(PlayerDestroyItemEvent.class, event -> {
-            if (!event.getEntity().level().isClientSide()) session().destroyedItems.destroyItem(event);
+            if (event.getEntity().level().isClientSide()) return;
+            session().destroyedItems.destroyItem(event);
+            session().placements.destroyItem(event);
         });
         bus.addListener(ProjectileImpactEvent.class, event -> {
             if (!event.getProjectile().level().isClientSide()) session().projectiles.impact(event);
@@ -256,6 +260,14 @@ final class ServerEvents {
             session().griefing.mobGriefing(event);
         });
         bus.addListener(LivingDestroyBlockEvent.class, event -> session().griefing.destroyBlock(event));
+        // Block placement (PlacementScenario): EntityPlaceEvent (EntityMultiPlaceEvent too) fires only on the server; the
+        // client's UseItemOnBlockEvent is ClientEvents' business.
+        bus.addListener(BlockEvent.EntityPlaceEvent.class, event -> {
+            if (!event.getLevel().isClientSide()) session().placements.place(event);
+        });
+        bus.addListener(UseItemOnBlockEvent.class, event -> {
+            if (!event.getLevel().isClientSide()) session().placements.useItemOnBlock(event);
+        });
         // Size and EntityConstructing also fire on the client (ClientEvents checks the local player's), visibility only
         // where a mob looks for a target.
         bus.addListener(EntityEvent.Size.class, event -> session().entities.size(event));
@@ -404,8 +416,9 @@ final class ServerEvents {
         private final EntityScenario entities = new EntityScenario(checks);
         private final LevelScenario levelEvents = new LevelScenario(checks, playerChecks);
         private final PlayerEventScenario playerEvents = new PlayerEventScenario(playerChecks);
+        private final PlacementScenario placements = new PlacementScenario(checks, playerChecks);
         private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
-                tames, blocks, levelEvents, playerEvents);
+                tames, blocks, levelEvents, playerEvents, placements);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
         private boolean newWorld;
@@ -590,6 +603,8 @@ final class ServerEvents {
             crops.run(overworld, BlockPos.containing(8, y - 48, 8));
             entities.run(overworld);
             levelEvents.run(overworld, BlockPos.containing(8, y - 60, 8));
+            // Above the others; the explosions go off at y - 72, on a later tick.
+            placements.run(overworld, BlockPos.containing(8, y - 12, 8));
         }
 
         private static Chicken spawnChicken(ServerLevel level, double y) {

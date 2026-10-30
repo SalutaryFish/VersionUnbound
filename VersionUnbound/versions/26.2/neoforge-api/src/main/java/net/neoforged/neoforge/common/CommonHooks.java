@@ -10,15 +10,20 @@ import com.google.common.collect.Lists;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.stats.Stats;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -31,17 +36,25 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.AdventureModePredicate;
+import net.minecraft.world.item.BucketItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.GameMasterBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.pattern.BlockInWorld;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModLoader;
 import net.neoforged.neoforge.common.damagesource.DamageContainer;
+import net.neoforged.neoforge.common.util.BlockSnapshot;
 import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import net.neoforged.neoforge.event.entity.EntityAttributeModificationEvent;
@@ -67,6 +80,7 @@ import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.salutaryfish.versionunbound.neoforge.patches.AttributeSupplierBuilderExtension;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
+import net.salutaryfish.versionunbound.neoforge.patches.LevelBlockSnapshots;
 import org.jspecify.annotations.Nullable;
 
 // VersionUnbound: ported a feature at a time, like EventHooks. The methods here are verbatim (deviations are marked) and
@@ -213,6 +227,99 @@ public class CommonHooks {
         }
 
         return event;
+    }
+
+    public static InteractionResult onPlaceItemIntoWorld(UseOnContext context) {
+        // VersionUnbound: NeoForge's body is in the overload below, which ItemStackMixin calls with vanilla's own
+        // Item.useOn call in ItemStack.useOn (Fabric API wraps that call for its ItemEvents.USE_ON)
+        return onPlaceItemIntoWorld(context, c -> c.getItemInHand().getItem().useOn(c));
+    }
+
+    // VersionUnbound: NeoForge's onPlaceItemIntoWorld, with the item's useOn passed in. The snapshot fields and
+    // markAndNotifyBlock come from LevelMixin through LevelBlockSnapshots.
+    public static InteractionResult onPlaceItemIntoWorld(UseOnContext context, Function<UseOnContext, InteractionResult> useOn) {
+        ItemStack itemstack = context.getItemInHand();
+        Level level = context.getLevel();
+        LevelBlockSnapshots snapshots = (LevelBlockSnapshots) level;
+
+        Player player = context.getPlayer();
+        if (player != null && !player.getAbilities().mayBuild) {
+            AdventureModePredicate adventureModePredicate = itemstack.get(DataComponents.CAN_PLACE_ON);
+            if (adventureModePredicate == null || !adventureModePredicate.test(new BlockInWorld(level, context.getClickedPos(), false))) {
+                return InteractionResult.PASS;
+            }
+        }
+
+        // handle all placement events here
+        Item item = itemstack.getItem();
+        int size = itemstack.getCount();
+        DataComponentMap components = itemstack.getComponents();
+
+        if (!(itemstack.getItem() instanceof BucketItem)) // if not bucket
+            snapshots.versionunbound$setCaptureBlockSnapshots(true);
+
+        ItemStack copy = itemstack.copy();
+        InteractionResult ret = useOn.apply(context);
+        if (itemstack.isEmpty())
+            EventHooks.onPlayerDestroyItem(player, copy, context.getHand());
+
+        snapshots.versionunbound$setCaptureBlockSnapshots(false);
+
+        if (ret.consumesAction()) {
+            // save new item data
+            int newSize = itemstack.getCount();
+            DataComponentMap newComponents = itemstack.getComponents();
+            @SuppressWarnings("unchecked")
+            List<BlockSnapshot> blockSnapshots = (List<BlockSnapshot>) snapshots.versionunbound$capturedBlockSnapshots().clone();
+            snapshots.versionunbound$capturedBlockSnapshots().clear();
+
+            // make sure to set pre-placement item data for event
+            itemstack.setCount(size);
+            itemstack.applyComponents(components);
+            //TODO: Set pre-placement item attachments?
+
+            Direction side = context.getClickedFace();
+
+            boolean eventResult = false;
+            if (blockSnapshots.size() > 1) {
+                eventResult = EventHooks.onMultiBlockPlace(player, blockSnapshots, side);
+            } else if (blockSnapshots.size() == 1) {
+                eventResult = EventHooks.onBlockPlace(player, blockSnapshots.get(0), side);
+            }
+
+            if (eventResult) {
+                ret = InteractionResult.FAIL; // cancel placement
+                // revert back all captured blocks
+                for (BlockSnapshot blocksnapshot : Lists.reverse(blockSnapshots)) {
+                    snapshots.versionunbound$setRestoringBlockSnapshots(true);
+                    blocksnapshot.restore(blocksnapshot.getFlags() | Block.UPDATE_CLIENTS);
+                    snapshots.versionunbound$setRestoringBlockSnapshots(false);
+                }
+                // inform the client that the item was not consumed
+                if (player instanceof ServerPlayer serverPlayer) {
+                    int slot = context.getHand() == InteractionHand.MAIN_HAND ? serverPlayer.getInventory().getSelectedSlot() : Inventory.SLOT_OFFHAND;
+                    serverPlayer.connection.send(serverPlayer.getInventory().createInventoryUpdatePacket(slot));
+                }
+            } else {
+                // Change the stack to its new content
+                itemstack.setCount(newSize);
+                itemstack.applyComponents(newComponents);
+
+                for (BlockSnapshot snap : blockSnapshots) {
+                    int updateFlag = snap.getFlags();
+                    BlockState oldBlock = snap.getState();
+                    BlockState newBlock = level.getBlockState(snap.getPos());
+                    newBlock.onPlace(level, snap.getPos(), oldBlock, false);
+
+                    snapshots.markAndNotifyBlock(snap.getPos(), level.getChunkAt(snap.getPos()), oldBlock, newBlock, updateFlag, 512);
+                }
+                if (player != null)
+                    player.awardStat(Stats.ITEM_USED.get(item));
+            }
+        }
+        snapshots.versionunbound$capturedBlockSnapshots().clear();
+
+        return ret;
     }
 
     private static final ThreadLocal<@Nullable Player> craftingPlayer = new ThreadLocal<>();
