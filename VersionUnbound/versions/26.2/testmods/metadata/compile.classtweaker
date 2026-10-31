@@ -1,0 +1,9 @@
+classTweaker	v1	official
+
+# What src/main/resources/META-INF/accesstransformer.cfg does, for javac: NeoForge's toolchain applies a mod's AT at
+# compile time too. Compile-time only; at run time the loader applies the AT itself.
+accessible	field	net/minecraft/world/food/FoodData	foodLevel	I
+accessible	method	net/minecraft/world/food/FoodData	add	(IF)V
+extendable	method	net/minecraft/world/food/FoodData	add	(IF)V
+accessible	method	net/minecraft/world/level/block/FireBlock	getFireTickDelay	(Lnet/minecraft/util/RandomSource;)I
+accessible	field	net/minecraft/world/level/block/FireBlock	igniteOdds	Lit/unimi/dsi/fastutil/objects/Object2IntMap;

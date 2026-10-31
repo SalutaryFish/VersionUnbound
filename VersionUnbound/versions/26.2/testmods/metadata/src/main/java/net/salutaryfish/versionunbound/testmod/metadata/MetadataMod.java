@@ -27,7 +27,7 @@ import org.slf4j.Logger;
 
 /**
  * Checks FML's metadata and context APIs: mod info, the mod list, the loading context, environment and paths,
- * extension points, annotation scan data and inter-mod messages. Each check logs PASS or FAIL; the last event
+ * extension points, annotation scan data, inter-mod messages and the mod's own access transformer. Each check logs PASS or FAIL; the last event
  * logs a summary line.
  */
 @Mod(MetadataMod.MOD_ID)
@@ -107,6 +107,12 @@ public class MetadataMod {
 
         modBus.addListener(FMLCommonSetupEvent.class, event -> {
             check("active container in common setup", ModLoadingContext.get().getActiveContainer() == container);
+            try {
+                AccessChecks.run(MetadataMod::check);
+            } catch (Throwable t) {
+                LOGGER.error("[metadata] the access transformer checks threw", t);
+                check("the access transformer checks ran", false);
+            }
             event.enqueueWork(() -> check("active container in deferred work", ModLoadingContext.get().getActiveContainer() == container));
         });
         modBus.addListener(InterModEnqueueEvent.class, event -> {

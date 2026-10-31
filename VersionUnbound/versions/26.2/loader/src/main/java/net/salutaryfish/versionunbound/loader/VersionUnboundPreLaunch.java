@@ -3,6 +3,7 @@ package net.salutaryfish.versionunbound.loader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,13 +18,14 @@ import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.fml.loading.VersionInfo;
+import net.neoforged.fml.loading.moddiscovery.ModFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Runs before Minecraft's classes load. Starts FML ({@link FMLLoader}), lets it read the NeoForge mod jars in
- * mods/, then puts the accepted jars on the game classpath and registers their mixin configs, so the mixins apply
- * when the target classes first load. Last, FML starts scanning the mods for annotations.
+ * mods/, then puts the accepted jars on the game classpath, applies their access transformers and registers their
+ * mixin configs, so both apply when the target classes first load. Last, FML starts scanning the mods for annotations.
  */
 public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
     private static final Logger LOGGER = LoggerFactory.getLogger("VersionUnbound");
@@ -57,12 +59,16 @@ public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
 
         // If FML rejected the mod set, it keeps only the system mods; the errors are thrown when mod loading starts.
         Set<Path> modJars = new HashSet<>(jars);
+        List<ModFile> added = new ArrayList<>();
         for (var modFileInfo : mods.getModFiles()) {
             var modFile = modFileInfo.getFile();
             if (!modJars.contains(modFile.getFilePath())) continue;
             FabricLauncherBase.getLauncher().addToClassPath(modFile.getFilePath());
+            added.add(modFile);
             LOGGER.info("Found NeoForge mod file {} with mods {}", modFile.getFileName(), modFile.getModInfos());
         }
+        // Before any of Minecraft's classes load, as FML's AT engine is in place before the game's classes are.
+        ModAccessTransformers.apply(added);
         NeoMixinConfigs.register(mods);
         // Only now: the scan threads load classes, and with them Mixin would take up configs before they're tagged.
         loader.startModScan();
