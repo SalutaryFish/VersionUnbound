@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.fml.ModLoader;
 import net.neoforged.fml.loading.progress.StartupNotificationManager;
 import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.event.BlockEntityTypeAddBlocksEvent;
 import net.salutaryfish.versionunbound.neoforge.mixin.registries.BuiltInRegistriesAccessor;
 import net.salutaryfish.versionunbound.neoforge.patches.SpawnPlacementsPatch;
 import org.jetbrains.annotations.ApiStatus;
@@ -90,8 +91,8 @@ public class GameData {
         } else {
             CommonHooks.modifyAttributes();
             SpawnPlacementsPatch.fireSpawnPlacementEvent(); // VersionUnbound: NeoForge adds it to SpawnPlacements
+            ModLoader.postEvent(new BlockEntityTypeAddBlocksEvent());
             // VersionUnbound: these arrive with the extension interfaces they rely on (Phase 2 step 5).
-            // ModLoader.postEvent(new BlockEntityTypeAddBlocksEvent());
             // CreativeModeTabRegistry.sortTabs();
             // GameRuleCategory.registerModdedCategories();
             // ItemTooltipHandler.init();

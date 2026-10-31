@@ -9,5 +9,6 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(targets = {"net.minecraft.world.level.block.CropBlock", "net.minecraft.world.item.BoneMealItem", "net.minecraft.resources.RegistryOps",
         "net.minecraft.core.registries.BuiltInRegistries", "net.minecraft.world.entity.SpawnPlacements",
         "net.minecraft.world.entity.ai.attributes.AttributeSupplier$Builder", "net.minecraft.tags.BlockTags", "net.minecraft.tags.ItemTags",
-        "net.minecraft.tags.FluidTags", "net.minecraft.world.item.DyeColor", "net.minecraft.world.item.AxeItem", "net.minecraft.world.item.ShovelItem"})
+        "net.minecraft.tags.FluidTags", "net.minecraft.world.item.DyeColor", "net.minecraft.world.item.AxeItem", "net.minecraft.world.item.ShovelItem",
+        "net.minecraft.world.level.block.entity.BlockEntityType"})
 abstract class AddedStaticMethodsTargetsMixin {}

@@ -162,6 +162,7 @@ public class RegistriesMod {
         modBus.addListener(FMLCommonSetupEvent.class, this::commonSetup);
         modBus.addListener(FMLLoadCompleteEvent.class, this::loadComplete);
         EntityChecks.register(modBus);
+        BlockEntityTypeChecks.register(modBus);
         ExtensionChecks.register();
         NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
             EntityChecks.checkWorld(worldChecks, event.getServer().overworld());
@@ -301,6 +302,7 @@ public class RegistriesMod {
 
         EntityChecks.checkRegistration(CHECKS);
         AccessChecks.checkRegistration(CHECKS);
+        BlockEntityTypeChecks.checkRegistration(CHECKS);
     }
 
     /** Called by the mixin when a server is about to load its world; the world checks summarize once it has started. */

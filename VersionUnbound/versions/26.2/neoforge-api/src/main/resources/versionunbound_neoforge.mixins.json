@@ -130,6 +130,8 @@
     "patches.AttributeSupplierBuilderMixin",
     "patches.BlockAppearanceMixin",
     "patches.BlockBehaviourExplosionMixin",
+    "patches.BlockEntityTypeAccessor",
+    "patches.BlockEntityTypeFieldsMixin",
     "patches.BlockEntityPersistentDataMixin",
     "patches.BlockStateAppearanceMixin",
     "patches.BlockStatePushReactionMixin",
