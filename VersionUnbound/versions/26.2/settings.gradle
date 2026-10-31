@@ -13,6 +13,8 @@ rootProject.name = 'versionunbound'
 
 // Layer A: the NeoForge 26.2 API implemented on Fabric 26.2.
 include 'neoforge-api'
+// Layer B for NeoForge 1.21.1 mods: upgrades their jars to the 26.2 API (rename map, bridges) before FML reads them.
+include 'upgrade-1.21.1'
 // FML on Fabric: discovers NeoForge jars in mods/ and loads them.
 include 'loader'
 // Hand-written NeoForge mods that each exercise one API area.

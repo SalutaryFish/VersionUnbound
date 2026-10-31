@@ -19,13 +19,15 @@ import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.fml.loading.VersionInfo;
 import net.neoforged.fml.loading.moddiscovery.ModFile;
+import net.salutaryfish.versionunbound.upgrade.v1_21_1.Upgrade1211;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Runs before Minecraft's classes load. Starts FML ({@link FMLLoader}), lets it read the NeoForge mod jars in
- * mods/, then puts the accepted jars on the game classpath, applies their access transformers and registers their
- * mixin configs, so both apply when the target classes first load. Last, FML starts scanning the mods for annotations.
+ * Runs before Minecraft's classes load. Starts FML ({@link FMLLoader}), upgrades the NeoForge 1.21.1 jars in mods/
+ * to the 26.2 API (Layer B, {@link Upgrade1211}), lets FML read the jars, then puts the accepted jars on the game
+ * classpath, applies their access transformers and registers their mixin configs, so both apply when the target
+ * classes first load. Last, FML starts scanning the mods for annotations.
  */
 public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
     private static final Logger LOGGER = LoggerFactory.getLogger("VersionUnbound");
@@ -55,6 +57,10 @@ public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to scan " + FMLPaths.MODSDIR.get() + " for NeoForge mods", e);
         }
+        // Layer B: 1.21.1 jars are swapped for their upgrades to the 26.2 API before FML reads them. The supertypes it
+        // needs come from the game's class files, read as resources: nothing loads yet.
+        ClassLoader game = FabricLauncherBase.getLauncher().getTargetClassLoader();
+        jars = Upgrade1211.upgrade(jars, fabric.getGameDir().resolve(".cache/versionunbound"), versions.mcVersion(), game::getResourceAsStream);
         LoadingModList mods = loader.discoverMods(minecraft.getOrigin().getPaths().getFirst(), layerA.getOrigin().getPaths(), jars);
 
         // If FML rejected the mod set, it keeps only the system mods; the errors are thrown when mod loading starts.

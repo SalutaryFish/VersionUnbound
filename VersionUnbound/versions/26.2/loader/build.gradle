@@ -9,6 +9,9 @@ loom {
 			sourceSet('main', ':neoforge-api')
 			sourceSet('client', ':neoforge-api')
 		}
+		versionunbound_upgrade_1_21_1 {
+			sourceSet('main', ':upgrade-1.21.1')
+		}
 	}
 }
 
@@ -19,6 +22,8 @@ dependencies {
 
 	implementation project(':neoforge-api')
 	include project(':neoforge-api')
+	implementation project(':upgrade-1.21.1')
+	include project(':upgrade-1.21.1')
 }
 
 processResources {
@@ -38,6 +43,8 @@ def copyTestMods = tasks.register('copyTestMods', Copy) {
 	from(project(':testmods:events').tasks.named('jar'))
 	from(project(':testmods:hooks').tasks.named('jar'))
 	from(project(':testmods:fabricprobe').tasks.named('jar'))
+	// Layer B's first real mod: the unmodified Chunky 1.21.1 jar from the corpus, upgraded at launch.
+	from(rootProject.file('../../../src/mod_Jars_1-21-1_Neoforge/Chunky/Chunky-NeoForge-1.4.23.jar'))
 	into(file('run/mods'))
 	doLast {
 		file('run/eula.txt').text = 'eula=true\n'

@@ -1,0 +1,29 @@
+apply plugin: 'net.fabricmc.fabric-loom'
+
+// Layer B for NeoForge 1.21.1 mods: the jar upgrader (upgrade/v1_21_1) runs in the loader's preLaunch, before FML reads
+// the jars; the bridges (compat/v1_21_1) are what upgraded jars call where 1.21.1's members are gone from 26.2.
+loom {
+	mods {
+		versionunbound_upgrade_1_21_1 {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${loader_version}"
+	// Loom gives vanilla classes the interfaces Fabric API and neoforge-api inject, so both are needed to compile.
+	implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+
+	// TOML and version ranges (bundled by neoforge-api, which the loader includes).
+	implementation project(':neoforge-api')
+}
+
+processResources {
+	def version = project.version
+	inputs.property 'version', version
+	filesMatching('fabric.mod.json') {
+		expand 'version': version
+	}
+}
