@@ -51,6 +51,9 @@ public final class HooksMod {
     /** Lets a sneaking player use blocks (doesSneakBypassUse). */
     static final DeferredItem<HookItems.SneakPass> SNEAK_PASS = ITEMS.registerItem("sneak_pass", HookItems.SneakPass::new);
 
+    static final DeferredItem<HookItems.Ember> EMBER = ITEMS.registerItem("ember", HookItems.Ember::new);
+    static final DeferredItem<HookItems.Wand> WAND = ITEMS.registerItem("wand", HookItems.Wand::new);
+
     public HooksMod(IEventBus modBus, Dist dist) {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
@@ -65,6 +68,7 @@ public final class HooksMod {
             BlockPos origin = new BlockPos(-8, level.getMaxY() - 8, -12);
             FireChecks.check(checks, level, origin);
             BlockChecks.check(checks, level, origin);
+            ItemChecks.check(checks, level, origin);
             checks.summarize();
         });
     }

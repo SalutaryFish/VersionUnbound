@@ -9,6 +9,9 @@ version = "0.1.0"
 displayName = "VersionUnbound Hooks"
 description = "Checks the vanilla call sites of NeoForge's extension methods: mods' blocks and items overriding them change what vanilla does."
 
+[[mixins]]
+config = "hooks.mixins.json"
+
 [[dependencies.hooks]]
 modId = "minecraft"
 type = "required"
