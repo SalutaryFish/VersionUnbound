@@ -141,11 +141,14 @@ decompile() {
     log "$ver: naming parameters and locals ($tag)"
     input="$CACHE/jars/$ver-client-$tag.jar"
     if [[ ! -f "$input" ]]; then
+      # tiny-remapper writes a jar only when the output name ends in .jar, and a folder
+      # otherwise. Older runs left such folders at $input; mv would move into them.
+      rm -rf "$input" "${input%.jar}.part.jar"
       java -jar "$TINY_REMAPPER_JAR" \
-        "$mojmap" "$input.part" "$names" official named "${libs[@]}" \
+        "$mojmap" "${input%.jar}.part.jar" "$names" official named "${libs[@]}" \
         --renameInvalidLocals '--invalidLvNamePattern=\$\$\d+' --inferNameFromSameLvIndex \
         --nonClassCopyMode=unchanged >"$CACHE/jars/$ver-names.log" 2>&1
-      mv "$input.part" "$input"
+      mv "${input%.jar}.part.jar" "$input"
     fi
   fi
 
