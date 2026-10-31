@@ -8,17 +8,17 @@
 #
 #   scripts/setup-src.sh [part...]    parts: clones fml jars mc (default: all of them)
 #
-# Runs itself through the flake's dev shell (java, git, jq, unzip, mc-src), so it needs Nix.
+# Needs git, curl and unzip; decompiling (only where src/mc-* is missing) runs mc-src, from
+# PATH or through Nix.
 # Already present parts are kept. A clone at another commit is reported and left alone.
 # SRC_DIR overrides the output dir (default: src/). FULL_HISTORY=1 clones whole branches
 # instead of just the pinned commit.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-if ! command -v mc-src >/dev/null; then
-  command -v nix >/dev/null || { echo "setup-src: needs Nix, or run it inside 'nix develop'" >&2; exit 1; }
-  exec nix develop "$root" -c "$root/scripts/setup-src.sh" "$@"
-fi
+for tool in git curl unzip; do
+  command -v "$tool" >/dev/null || { echo "setup-src: needs $tool (it's in 'nix develop')" >&2; exit 1; }
+done
 
 SRC=${SRC_DIR:-$root/src}
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/versionunbound"
@@ -162,7 +162,11 @@ mc() {
   local ver
   for ver in $MC_VERSIONS; do
     if [[ -d "$SRC/mc-$ver/java" ]]; then continue; fi
-    MC_SRC_DIR=$SRC mc-src "$ver"
+    if command -v mc-src >/dev/null; then
+      MC_SRC_DIR=$SRC mc-src "$ver"
+    else
+      MC_SRC_DIR=$SRC nix run "$root#mc-src" -- "$ver"
+    fi
   done
 }
 
