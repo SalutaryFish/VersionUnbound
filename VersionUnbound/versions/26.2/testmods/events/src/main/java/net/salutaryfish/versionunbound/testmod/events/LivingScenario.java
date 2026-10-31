@@ -80,7 +80,11 @@ final class LivingScenario {
     }
 
     void equipmentChange(LivingEquipmentChangeEvent event) {
-        if (event.getEntity() == equipped && event.getSlot() == EquipmentSlot.HEAD && event.getTo().is(Items.DIAMOND_HELMET)) helmetSeen = true;
+        if (event.getEntity() == equipped && event.getSlot() == EquipmentSlot.HEAD && event.getTo().is(Items.DIAMOND_HELMET)) {
+            helmetSeen = true;
+            // Seen: the zombie can go, long before it lands (see the end of run()).
+            event.getEntity().discard();
+        }
     }
 
     void useItem(LivingEntityUseItemEvent event) {
@@ -184,6 +188,17 @@ final class LivingScenario {
         ((AbstractHorseInvoker) camel).events$executeRidersJump(1.0F, Vec3.ZERO);
         checks.check("LivingJumpEvent fires once for a mob's, a slime's, a magma cube's, a horse's and a camel's jump",
                 List.of(zombie, slime, magmaCube, horse, camel).stream().map(entity -> jumps.getOrDefault(entity, 0)).toList(), List.of(1, 1, 1, 1, 1));
+
+        // The mobs are in the air near the top of the world: left there, they would fall onto the land around spawn, and
+        // those that die of it (the zombies, the horse) would leave their drops in the dev world, which is kept between
+        // runs (PlayerEventScenario's drops check once counted such an item). Only two stay: the helmeted zombie, until
+        // its equipment change is seen on its next tick (it goes then), and the quick user, a chicken (no fall damage),
+        // whose use runs out over two ticks; finish() removes what's left.
+        spawned.removeIf(entity -> {
+            if (entity == equipped || entity == quick) return false;
+            entity.discard();
+            return true;
+        });
     }
 
     // Every teleport fires the event (players have their own, in PlayerScenario); a mob that changes level arrives as a
