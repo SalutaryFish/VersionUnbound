@@ -49,6 +49,7 @@ import net.minecraft.world.level.BaseSpawner;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.ServerExplosion;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.SpawnData;
@@ -387,6 +388,12 @@ public class EventHooks {
 
     public static void onPlayerClone(Player player, Player oldPlayer, boolean wasDeath) {
         NeoForge.EVENT_BUS.post(new PlayerEvent.Clone(player, oldPlayer, wasDeath));
+    }
+
+    public static BlockState fireFluidPlaceBlockEvent(LevelAccessor level, BlockPos pos, BlockPos liquidPos, BlockState state) {
+        BlockEvent.FluidPlaceBlockEvent event = new BlockEvent.FluidPlaceBlockEvent(level, pos, liquidPos, state);
+        NeoForge.EVENT_BUS.post(event);
+        return event.getNewState();
     }
 
     public static boolean onExplosionStart(Level level, ServerExplosion explosion) {

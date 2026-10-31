@@ -36,6 +36,7 @@ def copyTestMods = tasks.register('copyTestMods', Copy) {
 	from(project(':testmods:lifecycle').tasks.named('jar'))
 	from(project(':testmods:registries').tasks.named('jar'))
 	from(project(':testmods:events').tasks.named('jar'))
+	from(project(':testmods:hooks').tasks.named('jar'))
 	from(project(':testmods:fabricprobe').tasks.named('jar'))
 	into(file('run/mods'))
 	doLast {

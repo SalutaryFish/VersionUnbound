@@ -1,0 +1,20 @@
+modLoader = "javafml"
+# Checked against the version of the built-in javafml loader (FML 11.0.16).
+loaderVersion = "[11,)"
+license = "LGPL-2.1-only"
+
+[[mods]]
+modId = "hooks"
+version = "0.1.0"
+displayName = "VersionUnbound Hooks"
+description = "Checks the vanilla call sites of NeoForge's extension methods: mods' blocks and items overriding them change what vanilla does."
+
+[[dependencies.hooks]]
+modId = "minecraft"
+type = "required"
+versionRange = "[26.2,)"
+
+[[dependencies.hooks]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.2.0,)"
