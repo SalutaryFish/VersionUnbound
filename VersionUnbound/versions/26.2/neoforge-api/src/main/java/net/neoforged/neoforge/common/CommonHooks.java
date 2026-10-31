@@ -26,6 +26,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
@@ -53,6 +54,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.GameMasterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.pattern.BlockInWorld;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModLoader;
@@ -201,6 +203,34 @@ public class CommonHooks {
 
     public static boolean onLivingDrops(LivingEntity entity, DamageSource source, Collection<ItemEntity> drops, boolean recentlyHit) {
         return NeoForge.EVENT_BUS.post(new LivingDropsEvent(entity, source, drops, recentlyHit)).isCanceled();
+    }
+
+    public static Optional<BlockPos> isLivingOnLadder(BlockState state, Level level, BlockPos pos, LivingEntity entity) {
+        boolean isSpectator = (entity instanceof Player && entity.isSpectator());
+        if (isSpectator)
+            return Optional.empty();
+        // VersionUnbound: NeoForge asks NeoForgeServerConfig.INSTANCE.fullBoundingBoxLadders (false by default) until
+        // NeoForge's configs are ported (Phase 2 step 6); its default stands in.
+        if (!false) {
+            return state.isLadder(level, pos, entity) ? Optional.of(pos) : Optional.empty();
+        } else {
+            AABB bb = entity.getBoundingBox();
+            int mX = Mth.floor(bb.minX);
+            int mY = Mth.floor(bb.minY);
+            int mZ = Mth.floor(bb.minZ);
+            for (int y2 = mY; y2 < bb.maxY; y2++) {
+                for (int x2 = mX; x2 < bb.maxX; x2++) {
+                    for (int z2 = mZ; z2 < bb.maxZ; z2++) {
+                        BlockPos tmp = new BlockPos(x2, y2, z2);
+                        state = level.getBlockState(tmp);
+                        if (state.isLadder(level, tmp, entity)) {
+                            return Optional.of(tmp);
+                        }
+                    }
+                }
+            }
+            return Optional.empty();
+        }
     }
 
     public static LivingFallEvent onLivingFall(LivingEntity entity, double distance, float damageMultiplier) {

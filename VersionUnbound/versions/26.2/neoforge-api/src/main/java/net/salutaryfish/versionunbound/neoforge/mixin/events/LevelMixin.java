@@ -33,9 +33,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * state, and returns once it has, without what vanilla does next; {@code markAndNotifyBlock} is NeoForge's copy of
  * that, which {@code CommonHooks.onPlaceItemIntoWorld} calls for each snapshot once the event lets the placement stand.
  * NeoForge's {@code setBlock} calls {@code markAndNotifyBlock} itself; here vanilla's body stays (other mods' mixins
- * target it), so a mixin into {@code markAndNotifyBlock} only sees the released snapshots and direct calls. Not ported
- * from that hunk: the block state extension's {@code onBlockStateChange} at the end of {@code markAndNotifyBlock}
- * (Phase 2 step 5).
+ * target it), so a mixin into {@code markAndNotifyBlock} only sees the released snapshots and direct calls. The block
+ * state extension's {@code onBlockStateChange} at the end of {@code markAndNotifyBlock} is called there and, since step
+ * 5, at the same point of vanilla's {@code setBlock} (LevelNeighborChangesMixin).
  *
  * <p>{@code BlockEvent.NeighborNotifyEvent} in vanilla's empty {@code updateNeighborsAt}. {@code ServerLevel} overrides
  * it without calling it, so this fires only on the client (for pistons, which move blocks on both sides), though the
@@ -137,8 +137,7 @@ abstract class LevelMixin implements LevelBlockSnapshots {
             }
 
             level.updatePOIOnBlockStateChange(pos, oldState, newState);
-            // VersionUnbound: NeoForge calls blockState.onBlockStateChange(this, pos, oldState) here, a block state
-            // extension method (Phase 2 step 5).
+            blockState.onBlockStateChange(level, pos, oldState);
         }
     }
 

@@ -35,6 +35,13 @@ public final class HooksMod {
     /** Refuses to be removed by a player (onDestroyedByPlayer). */
     static final DeferredBlock<HookBlocks.StubbornBlock> STUBBORN_BLOCK = BLOCKS.registerBlock("stubborn_block", HookBlocks.StubbornBlock::new);
 
+    static final DeferredBlock<HookBlocks.BlastBlock> BLAST_BLOCK = BLOCKS.registerBlock("blast_block", HookBlocks.BlastBlock::new);
+    static final DeferredBlock<HookBlocks.GlueBlock> GLUE = BLOCKS.registerBlock("glue", HookBlocks.GlueBlock::new);
+    static final DeferredBlock<HookBlocks.RuneShelf> RUNE_SHELF = BLOCKS.registerBlock("rune_shelf", HookBlocks.RuneShelf::new);
+    static final DeferredBlock<HookBlocks.Rope> ROPE = BLOCKS.registerBlock("rope", HookBlocks.Rope::new, properties -> properties.noCollision());
+    static final DeferredBlock<HookBlocks.Thorns> THORNS = BLOCKS.registerBlock("thorns", HookBlocks.Thorns::new, properties -> properties.noCollision());
+    static final DeferredBlock<HookBlocks.Listener> LISTENER = BLOCKS.registerBlock("listener", HookBlocks.Listener::new);
+
     private static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MOD_ID);
     /** Not shears, but can carve pumpkins and trim plants. */
     static final DeferredItem<HookItems.CarvingKnife> CARVING_KNIFE = ITEMS.registerItem("carving_knife", HookItems.CarvingKnife::new);
@@ -57,6 +64,7 @@ public final class HooksMod {
             Checks checks = new Checks("server checks");
             BlockPos origin = new BlockPos(-8, level.getMaxY() - 8, -12);
             FireChecks.check(checks, level, origin);
+            BlockChecks.check(checks, level, origin);
             checks.summarize();
         });
     }
