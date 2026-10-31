@@ -18,6 +18,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.level.redstone.Orientation;
 import org.jspecify.annotations.Nullable;
@@ -198,6 +199,47 @@ final class HookBlocks {
         @Override
         public void onBlockStateChange(LevelReader level, BlockPos pos, BlockState oldState, BlockState newState) {
             HEARD.add("onBlockStateChange " + pos.toShortString() + " was " + oldState.getBlock().getDescriptionId());
+        }
+    }
+
+    /** Redstone dust connects to it from every side (canConnectRedstone), though it gives no signal. */
+    static final class Terminal extends Block {
+        Terminal(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public boolean canConnectRedstone(BlockState state, BlockGetter level, BlockPos pos, @Nullable Direction direction) {
+            return true;
+        }
+    }
+
+    /** Pistons can't push it (getPistonPushReaction), whatever its properties say. */
+    static final class Anchor extends Block {
+        Anchor(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public @Nullable PushReaction getPistonPushReaction(BlockState state) {
+            return PushReaction.BLOCK;
+        }
+    }
+
+    /** The last entity a cushion's addLandingEffects heard of. */
+    static @Nullable LivingEntity landed;
+
+    /** Makes its own landing effects (addLandingEffects), so vanilla sends no particles. */
+    static final class Cushion extends Block {
+        Cushion(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public boolean addLandingEffects(BlockState state1, ServerLevel level, BlockPos pos, BlockState state2, LivingEntity entity, int numberOfParticles) {
+            HEARD.add("addLandingEffects " + pos.toShortString() + " " + numberOfParticles);
+            landed = entity;
+            return true;
         }
     }
 }

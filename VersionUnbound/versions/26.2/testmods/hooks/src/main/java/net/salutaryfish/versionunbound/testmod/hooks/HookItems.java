@@ -3,6 +3,7 @@ package net.salutaryfish.versionunbound.testmod.hooks;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
@@ -103,6 +104,18 @@ final class HookItems {
         public boolean onEntitySwing(ItemStack stack, LivingEntity entity, InteractionHand hand) {
             HEARD.add("onEntitySwing " + hand);
             return true;
+        }
+    }
+
+    /** Stacks to 16 once named, otherwise as its max stack size component says (getMaxStackSize). */
+    static final class Pouch extends Item {
+        Pouch(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public int getMaxStackSize(ItemStack stack) {
+            return stack.has(DataComponents.CUSTOM_NAME) ? 16 : super.getMaxStackSize(stack);
         }
     }
 }

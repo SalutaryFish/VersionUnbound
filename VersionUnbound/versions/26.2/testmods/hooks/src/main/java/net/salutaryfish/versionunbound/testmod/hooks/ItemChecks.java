@@ -2,9 +2,12 @@ package net.salutaryfish.versionunbound.testmod.hooks;
 
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -20,7 +23,7 @@ import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 /**
  * The item extension's hooks: crafting remainders ({@code getCraftingRemainder}, on the stack: Fabric API's and
  * NeoForge's defaults meet there), furnace burn times ({@code getBurnTime}), an item entity's tick
- * ({@code onEntityItemUpdate}) and a swing ({@code onEntitySwing}).
+ * ({@code onEntityItemUpdate}), a swing ({@code onEntitySwing}) and a stack's max stack size ({@code getMaxStackSize}).
  */
 final class ItemChecks {
     private ItemChecks() {}
@@ -30,6 +33,7 @@ final class ItemChecks {
             checkRemainders(checks);
             checkFurnace(checks, level, pos);
             checkEntities(checks, level, pos);
+            checkStackSize(checks);
         } finally {
             HooksMod.clear(level, pos);
         }
@@ -84,5 +88,16 @@ final class ItemChecks {
         zombie.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STICK));
         zombie.swing(InteractionHand.MAIN_HAND);
         checks.check("a swing asks the stack's onEntitySwing, which can cancel it", canceled && zombie.swinging);
+    }
+
+    private static void checkStackSize(Checks checks) {
+        ItemStack plain = new ItemStack(HooksMod.POUCH.get());
+        ItemStack named = new ItemStack(HooksMod.POUCH.get());
+        named.set(DataComponents.CUSTOM_NAME, Component.literal("hooks"));
+        SimpleContainer container = new SimpleContainer(1);
+        container.setItem(0, named.copyWithCount(64));
+        checks.check("a stack's max stack size asks the item's stack-aware getMaxStackSize, and a container holds no more",
+                plain.getMaxStackSize() == 64 && named.getMaxStackSize() == 16 && named.isStackable() && container.getItem(0).getCount() == 16
+                        && new ItemStack(Items.ENDER_PEARL).getMaxStackSize() == 16);
     }
 }

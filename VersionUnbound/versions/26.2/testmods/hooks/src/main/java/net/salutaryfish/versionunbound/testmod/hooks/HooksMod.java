@@ -46,6 +46,9 @@ public final class HooksMod {
     static final DeferredBlock<HookBlocks.Rope> ROPE = BLOCKS.registerBlock("rope", HookBlocks.Rope::new, properties -> properties.noCollision());
     static final DeferredBlock<HookBlocks.Thorns> THORNS = BLOCKS.registerBlock("thorns", HookBlocks.Thorns::new, properties -> properties.noCollision());
     static final DeferredBlock<HookBlocks.Listener> LISTENER = BLOCKS.registerBlock("listener", HookBlocks.Listener::new);
+    static final DeferredBlock<HookBlocks.Terminal> TERMINAL = BLOCKS.registerBlock("terminal", HookBlocks.Terminal::new);
+    static final DeferredBlock<HookBlocks.Anchor> ANCHOR = BLOCKS.registerBlock("anchor", HookBlocks.Anchor::new);
+    static final DeferredBlock<HookBlocks.Cushion> CUSHION = BLOCKS.registerBlock("cushion", HookBlocks.Cushion::new);
 
     /** A block entity that records the block entity extension's calls (HookBlockEntities). */
     static final DeferredBlock<HookBlockEntities.RecorderBlock> RECORDER = BLOCKS.registerBlock("recorder", HookBlockEntities.RecorderBlock::new);
@@ -65,6 +68,7 @@ public final class HooksMod {
 
     static final DeferredItem<HookItems.Ember> EMBER = ITEMS.registerItem("ember", HookItems.Ember::new);
     static final DeferredItem<HookItems.Wand> WAND = ITEMS.registerItem("wand", HookItems.Wand::new);
+    static final DeferredItem<HookItems.Pouch> POUCH = ITEMS.registerItem("pouch", HookItems.Pouch::new);
 
     private static final Checks SERVER_CHECKS = new Checks("server checks");
 
