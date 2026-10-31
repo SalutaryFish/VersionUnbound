@@ -66,5 +66,11 @@ public class VersionUnboundPreLaunch implements PreLaunchEntrypoint {
         NeoMixinConfigs.register(mods);
         // Only now: the scan threads load classes, and with them Mixin would take up configs before they're tagged.
         loader.startModScan();
+        // And finish it here, before Knot loads the game's classes. A scan thread loading a class (through Knot, which
+        // holds that class's lock and then waits for Mixin's transformer lock) deadlocks with the main thread applying
+        // mixins (which holds the transformer lock and can then load a class through Knot): seen with MixinExtras
+        // loading a class while the scanner loaded ModClassVisitor. FML overlaps the scan with the game's bootstrap;
+        // ModLoader's own waitForScanToComplete then returns at once.
+        loader.backgroundScanHandler.waitForScanToComplete(() -> {});
     }
 }
