@@ -45,17 +45,21 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.salutaryfish.versionunbound.testmod.events.mixin.MinecraftAccessor;
 
 /**
- * Client-side checks, for a client that joins a world (singleplayer or a server). After {@value #ACT_AT} client ticks in
- * the level (once the server's player scenario, with its respawn, is over), the client drives its own interaction code:
+ * Client-side checks, for a client that joins a world (singleplayer or a server). {@value #ACT_AT} client ticks after
+ * the respawn that ends the server's player scenario (its {@code Clone}; or, if none comes, after {@value #CLONE_TIMEOUT}
+ * ticks in the level), the client drives its own interaction code:
  * right click on a block and with the hand, an item used up, left click on a block, a block break, and clicks at
- * nothing; some of these canceled. At {@value #LEAVE_AT} ticks the first checks run (including a chunk the client is made to drop, as when the
+ * nothing; some of these canceled. At {@value #LEAVE_AT} ticks after it the first checks run (including a chunk the client is made to drop, as when the
  * server forgets it) and the client leaves the world; the logging-out and unload checks follow on the next tick, then
  * the summary. Every listener runs on the render thread; events for the integrated
  * server's levels and entities are filtered out.
  */
 final class ClientEvents {
+    // Counted from the respawn, so the server's player scenario (which moves the player between levels, puts items in its
+    // hands and respawns it) is over: on a slow machine it can still be running 60 ticks after the client joins.
     private static final int ACT_AT = 60;
     private static final int LEAVE_AT = 100;
+    private static final int CLONE_TIMEOUT = 600;
     private static final Checks CHECKS = new Checks("client checks");
 
     private static int clientTicksPre;
@@ -99,6 +103,7 @@ final class ClientEvents {
     private static final Set<LocalPlayer> joinedPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<LocalPlayer> leftPlayers = Collections.newSetFromMap(new IdentityHashMap<>());
     private static int ticksInLevel;
+    private static int ticksAfterRespawn;
     private static int phase;
 
     private ClientEvents() {}
@@ -232,9 +237,11 @@ final class ClientEvents {
         }
         if (phase > 2 || minecraft.level == null || minecraft.player == null) return;
         ticksInLevel++;
-        if (ticksInLevel == ACT_AT) {
+        if (clone == null && ticksInLevel < CLONE_TIMEOUT) return;
+        ticksAfterRespawn++;
+        if (ticksAfterRespawn == ACT_AT) {
             act(minecraft);
-        } else if (ticksInLevel == LEAVE_AT) {
+        } else if (ticksAfterRespawn == LEAVE_AT) {
             inWorld(minecraft);
             phase = 2;
             minecraft.disconnect(new TitleScreen(), false);
@@ -282,11 +289,14 @@ final class ClientEvents {
         CHECKS.check("BreakBlockEvent fires on the client, and canceling it keeps the block",
                 ground.equals(breakPos) && !broken && !minecraft.level.getBlockState(ground).isAir());
 
-        // Clicks at nothing, with empty hands.
+        // Clicks at nothing, with empty hands. Both emptied here: the server's player scenario, which can run at the same
+        // time on a slow machine, puts items in the player's hands (and the server sends them).
+        player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+        player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
         minecraft.hitResult = BlockHitResult.miss(player.getEyePosition(), Direction.UP, player.blockPosition().above(5));
         ((MinecraftAccessor) minecraft).events$startUseItem();
         ((MinecraftAccessor) minecraft).events$startAttack();
-        CHECKS.check("RightClickEmpty fires for each empty hand, LeftClickEmpty for an attack at nothing", rightClickEmpty == 2 && leftClickEmpty == 1);
+        CHECKS.check("RightClickEmpty fires for each empty hand, LeftClickEmpty for an attack at nothing", List.of(rightClickEmpty, leftClickEmpty), List.of(2, 1));
 
         // NeoForge's Level patch fires NeighborNotifyEvent in the three-argument updateNeighborsAt, which on the client
         // only pistons call (they move blocks on both sides).

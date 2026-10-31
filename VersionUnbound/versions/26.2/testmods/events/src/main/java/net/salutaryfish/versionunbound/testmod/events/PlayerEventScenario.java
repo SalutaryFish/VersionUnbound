@@ -1,5 +1,6 @@
 package net.salutaryfish.versionunbound.testmod.events;
 
+import com.mojang.logging.LogUtils;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -69,7 +70,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerWakeUpEvent;
  * modifier; stone broken in survival with an empty hand, which drops something only when the check allows it),
  * {@code BonemealEvent} (bone meal used on wheat; canceled, counting as used or not; vanilla's {@code growCrop} without a
  * player; NeoForge's static {@code applyBonemeal}), and {@code StartTracking}/{@code StopTracking} for an armor stand
- * added next to the player and discarded ten ticks later. The listeners only record events for the player while the scenario runs (the tracking
+ * added next to the player and discarded once the player tracks it (or after 90 ticks). The listeners only record events for the player while the scenario runs (the tracking
  * ones: for the stand).
  */
 final class PlayerEventScenario {
@@ -78,8 +79,9 @@ final class PlayerEventScenario {
     private static final Identifier CRAFTING_TABLE_RECIPE = Identifier.withDefaultNamespace("recipes/decorations/crafting_table");
 
     // The level pairs an entity with a player once the player's client has its chunk; the player scenario has just taken
-    // the player to the nether and back, so that takes a few ticks. The stand is checked and removed this many ticks on.
-    private static final int TRACKING_CHECK_AT = 10;
+    // the player to the nether and back, so that takes some ticks (a few on a fast machine, more than ten in a slower cloud
+    // container). The stand is checked and removed once StartTracking came, or after this many ticks.
+    private static final int TRACKING_TIMEOUT = 90;
 
     private final Checks playerChecks;
     private volatile ServerPlayer player;
@@ -426,7 +428,10 @@ final class PlayerEventScenario {
 
     /** Each server tick (Post): the stand added for the tracking check. */
     void tick() {
-        if (stand == null || ++ticksSinceStand < TRACKING_CHECK_AT) return;
+        if (stand == null) return;
+        ++ticksSinceStand;
+        if (tracking.isEmpty() && ticksSinceStand < TRACKING_TIMEOUT) return;
+        LogUtils.getLogger().info("[events] the tracking check's armor stand: {} ticks", ticksSinceStand);
         ArmorStand checked = stand;
         List<Object> started = List.copyOf(tracking);
         tracking.clear();
