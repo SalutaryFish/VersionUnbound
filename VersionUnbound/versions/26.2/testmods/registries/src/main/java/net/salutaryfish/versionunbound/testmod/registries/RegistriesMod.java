@@ -162,9 +162,11 @@ public class RegistriesMod {
         modBus.addListener(FMLCommonSetupEvent.class, this::commonSetup);
         modBus.addListener(FMLLoadCompleteEvent.class, this::loadComplete);
         EntityChecks.register(modBus);
+        ExtensionChecks.register();
         NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
             EntityChecks.checkWorld(worldChecks, event.getServer().overworld());
             AccessChecks.checkWorld(worldChecks, event.getServer().overworld());
+            ExtensionChecks.checkWorld(worldChecks, event.getServer().overworld());
             worldChecks.summarize();
         });
     }

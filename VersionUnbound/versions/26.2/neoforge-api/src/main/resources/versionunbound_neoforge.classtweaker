@@ -10,6 +10,18 @@ inject-interface	net/minecraft/core/Holder	net/neoforged/neoforge/common/extensi
 inject-interface	net/minecraft/core/HolderSet	net/neoforged/neoforge/common/extensions/IHolderSetExtension<TT;>
 inject-interface	net/minecraft/world/level/BaseSpawner	net/neoforged/neoforge/common/extensions/IOwnedSpawner
 inject-interface	net/minecraft/world/level/block/entity/trialspawner/TrialSpawner	net/neoforged/neoforge/common/extensions/IOwnedSpawner
+inject-interface	net/minecraft/world/level/block/Block	net/neoforged/neoforge/common/extensions/IBlockExtension
+inject-interface	net/minecraft/world/level/block/state/BlockState	net/neoforged/neoforge/common/extensions/IBlockStateExtension
+inject-interface	net/minecraft/world/item/Item	net/neoforged/neoforge/common/extensions/IItemExtension
+inject-interface	net/minecraft/world/item/ItemStack	net/neoforged/neoforge/common/extensions/IItemStackExtension
+inject-interface	net/minecraft/world/item/ItemStack	net/neoforged/neoforge/common/MutableDataComponentHolder
+inject-interface	net/minecraft/world/item/ItemInstance	net/neoforged/neoforge/common/extensions/ItemInstanceExtension
+inject-interface	net/minecraft/world/level/BlockGetter	net/neoforged/neoforge/common/extensions/IBlockGetterExtension
+inject-interface	net/minecraft/world/level/LevelReader	net/neoforged/neoforge/common/extensions/ILevelReaderExtension
+inject-interface	net/minecraft/world/level/block/entity/BlockEntity	net/neoforged/neoforge/common/extensions/IBlockEntityExtension
+inject-interface	net/minecraft/core/TypedInstance	net/neoforged/neoforge/common/extensions/TypedInstanceExtension<TT;>
+inject-interface	net/minecraft/world/level/Level	net/neoforged/neoforge/common/extensions/ILevelExtension
+inject-interface	net/minecraft/core/HolderLookup$Provider	net/neoforged/neoforge/common/extensions/IHolderLookupProviderExtension
 # Methods NeoForge's patches add to vanilla classes (see the patches package).
 inject-interface	net/minecraft/resources/Identifier	net/salutaryfish/versionunbound/neoforge/patches/IdentifierExtension
 inject-interface	net/minecraft/core/HolderLookup$RegistryLookup	net/salutaryfish/versionunbound/neoforge/patches/RegistryLookupExtension<TT;>
@@ -21,8 +33,9 @@ inject-interface	net/minecraft/world/level/chunk/ChunkAccess	net/salutaryfish/ve
 inject-interface	net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder	net/salutaryfish/versionunbound/neoforge/patches/AttributeSupplierBuilderExtension
 inject-interface	net/minecraft/world/entity/Entity	net/salutaryfish/versionunbound/neoforge/patches/EntityExtension
 inject-interface	net/minecraft/world/entity/Mob	net/salutaryfish/versionunbound/neoforge/patches/MobExtension
-inject-interface	net/minecraft/world/level/block/Block	net/salutaryfish/versionunbound/neoforge/patches/BlockExtension
-inject-interface	net/minecraft/world/level/block/state/BlockState	net/salutaryfish/versionunbound/neoforge/patches/BlockStateExtension
+inject-interface	net/minecraft/world/item/DyeColor	net/salutaryfish/versionunbound/neoforge/patches/DyeColorExtension
+inject-interface	net/minecraft/world/level/block/entity/BlockEntityType	net/salutaryfish/versionunbound/neoforge/patches/BlockEntityTypeExtension
+inject-interface	net/minecraft/server/level/ServerLevel	net/salutaryfish/versionunbound/neoforge/patches/ServerLevelCapabilities
 
 # NeoForge's own code reads these: RegistryOpsPatch the lookup provider, GameData vanilla's point of interest map (which
 # NeoForge's patch replaces with GameData's), AttributeSupplierBuilderExtension a supplier's instances, and
@@ -33,6 +46,10 @@ accessible	field	net/minecraft/world/entity/ai/attributes/AttributeSupplier	inst
 accessible	field	net/minecraft/world/entity/SpawnPlacements	DATA_BY_TYPE	Ljava/util/Map;
 accessible	class	net/minecraft/world/entity/SpawnPlacements$Data
 accessible	method	net/minecraft/world/entity/SpawnPlacements$Data	<init>	(Lnet/minecraft/world/level/levelgen/Heightmap$Types;Lnet/minecraft/world/entity/SpawnPlacementType;Lnet/minecraft/world/entity/SpawnPlacements$SpawnPredicate;)V
+# For the patches/ classes: ToolItemsPatch reads the axe's and shovel's maps, BlockEntityTypeExtension the valid blocks.
+accessible	field	net/minecraft/world/item/AxeItem	STRIPPABLES	Ljava/util/Map;
+accessible	field	net/minecraft/world/item/ShovelItem	FLATTENABLES	Ljava/util/Map;
+accessible	field	net/minecraft/world/level/block/entity/BlockEntityType	validBlocks	Ljava/util/Set;
 
 # NeoForge's access transformers: all of them, below the marker (generateClassTweakerAccess in build.gradle).
 

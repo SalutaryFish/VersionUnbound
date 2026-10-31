@@ -13,10 +13,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.dispenser.BlockSource;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
-// VersionUnbound: IBlockExtension and IItemExtension (linked from the javadoc below) arrive with the extension
-// interfaces (Phase 2 step 5); importing them here would need them now.
-// import net.neoforged.neoforge.common.extensions.IBlockExtension;
-// import net.neoforged.neoforge.common.extensions.IItemExtension;
+import net.neoforged.neoforge.common.extensions.IBlockExtension;
+import net.neoforged.neoforge.common.extensions.IItemExtension;
 
 public class ItemAbilities {
     /**

@@ -24,7 +24,9 @@ import org.objectweb.asm.tree.VarInsnNode;
  * Added: {@code CropBlock.getGrowthSpeed(BlockState, BlockGetter, BlockPos)} (KaleidoscopeCookery's rice calls it),
  * {@code BoneMealItem.applyBonemeal(ItemStack, Level, BlockPos, Player)}, {@code RegistryOps.retrieveRegistryLookup},
  * {@code BuiltInRegistries.getVanillaRegistrationOrder}, {@code SpawnPlacements.hasPlacement} and
- * {@code fireSpawnPlacementEvent}, and the constructor {@code AttributeSupplier.Builder(AttributeSupplier)}. To add one,
+ * {@code fireSpawnPlacementEvent}, {@code create(Identifier)} on {@code BlockTags}, {@code ItemTags} and {@code FluidTags},
+ * {@code DyeColor.getColor}, {@code AxeItem.getAxeStrippingState}, {@code ShovelItem.getShovelPathingState}, and the
+ * constructor {@code AttributeSupplier.Builder(AttributeSupplier)}. To add one,
  * add a line here and the class to the carrier.
  */
 final class AddedStaticMethods {
@@ -43,7 +45,22 @@ final class AddedStaticMethods {
             new AddedStaticMethod("net/minecraft/world/entity/SpawnPlacements", Opcodes.ACC_PUBLIC, "hasPlacement",
                     "(Lnet/minecraft/world/entity/EntityType;)Z", "net/salutaryfish/versionunbound/neoforge/patches/SpawnPlacementsPatch"),
             new AddedStaticMethod("net/minecraft/world/entity/SpawnPlacements", Opcodes.ACC_PUBLIC, "fireSpawnPlacementEvent",
-                    "()V", "net/salutaryfish/versionunbound/neoforge/patches/SpawnPlacementsPatch"));
+                    "()V", "net/salutaryfish/versionunbound/neoforge/patches/SpawnPlacementsPatch"),
+            new AddedStaticMethod("net/minecraft/tags/BlockTags", Opcodes.ACC_PUBLIC, "create", "(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/tags/TagKey;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/TagsPatch", "createBlockTag", false),
+            new AddedStaticMethod("net/minecraft/tags/ItemTags", Opcodes.ACC_PUBLIC, "create", "(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/tags/TagKey;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/TagsPatch", "createItemTag", false),
+            new AddedStaticMethod("net/minecraft/tags/FluidTags", Opcodes.ACC_PUBLIC, "create", "(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/tags/TagKey;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/TagsPatch", "createFluidTag", false),
+            new AddedStaticMethod("net/minecraft/world/item/DyeColor", Opcodes.ACC_PUBLIC, "getColor",
+                    "(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/world/item/DyeColor;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/DyeColorExtension", "getColor", true),
+            new AddedStaticMethod("net/minecraft/world/item/AxeItem", Opcodes.ACC_PUBLIC, "getAxeStrippingState",
+                    "(Lnet/minecraft/world/level/block/state/BlockState;)Lnet/minecraft/world/level/block/state/BlockState;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/ToolItemsPatch"),
+            new AddedStaticMethod("net/minecraft/world/item/ShovelItem", Opcodes.ACC_PUBLIC, "getShovelPathingState",
+                    "(Lnet/minecraft/world/level/block/state/BlockState;)Lnet/minecraft/world/level/block/state/BlockState;",
+                    "net/salutaryfish/versionunbound/neoforge/patches/ToolItemsPatch"));
 
     private static final List<AddedConstructor> CONSTRUCTORS = List.of(
             new AddedConstructor("net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder", Opcodes.ACC_PUBLIC,
@@ -101,8 +118,16 @@ final class AddedStaticMethods {
         }
     }
 
-    /** A static method on {@code owner} whose body is a call of {@code implementation}'s method of the same name and descriptor. */
-    private record AddedStaticMethod(String owner, int access, String name, String descriptor, String implementation) {
+    /**
+     * A static method on {@code owner} whose body is a call of {@code implementation}'s static method of the same
+     * descriptor, named {@code implementationName} (by default the same name).
+     */
+    private record AddedStaticMethod(String owner, int access, String name, String descriptor, String implementation, String implementationName,
+            boolean implementationIsInterface) {
+        AddedStaticMethod(String owner, int access, String name, String descriptor, String implementation) {
+            this(owner, access, name, descriptor, implementation, name, false);
+        }
+
         MethodNode forwarder() {
             MethodNode node = new MethodNode(access | Opcodes.ACC_STATIC, name, descriptor, null, null);
             int slot = 0;
@@ -110,7 +135,7 @@ final class AddedStaticMethods {
                 node.instructions.add(new VarInsnNode(argument.getOpcode(Opcodes.ILOAD), slot));
                 slot += argument.getSize();
             }
-            node.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, implementation, name, descriptor, false));
+            node.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, implementation, implementationName, descriptor, implementationIsInterface));
             Type result = Type.getReturnType(descriptor);
             node.instructions.add(new InsnNode(result.getOpcode(Opcodes.IRETURN)));
             node.maxLocals = slot;

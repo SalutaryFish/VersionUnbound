@@ -87,6 +87,22 @@ import net.salutaryfish.versionunbound.neoforge.patches.AttributeSupplierBuilder
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.LevelBlockSnapshots;
 import org.jspecify.annotations.Nullable;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.PotionItem;
+import net.minecraft.world.item.SpawnEggItem;
+import net.minecraft.world.item.TippedArrowItem;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.item.alchemy.PotionContents;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.neoforged.neoforge.event.ItemAttributeModifierEvent;
 
 // VersionUnbound: ported a feature at a time, like EventHooks. The methods here are verbatim (deviations are marked) and
 // in NeoForge's order; the others arrive with their features. A mod calling a method that isn't here yet gets
@@ -553,5 +569,49 @@ public class CommonHooks {
     public static boolean canMobEffectBeApplied(LivingEntity entity, MobEffectInstance effect, @Nullable Entity source) {
         var event = new MobEffectEvent.Applicable(entity, effect, source);
         return NeoForge.EVENT_BUS.post(event).getApplicationResult();
+    }
+
+    /**
+     * Used as the default implementation of {@link Item#getCreatorModId}. Call that method instead.
+     */
+    @Nullable
+    public static String getDefaultCreatorModId(HolderLookup.Provider registries, ItemStack itemStack) {
+        Item item = itemStack.getItem();
+        Identifier registryName = BuiltInRegistries.ITEM.getKey(item);
+        String modId = registryName == null ? null : registryName.getNamespace();
+        if ("minecraft".equals(modId)) {
+            if (itemStack.has(DataComponents.STORED_ENCHANTMENTS)) {
+                Set<Holder<Enchantment>> enchantments = itemStack.getOrDefault(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY).keySet();
+                if (enchantments.size() == 1) {
+                    Holder<Enchantment> enchantmentHolder = enchantments.iterator().next();
+                    Optional<ResourceKey<Enchantment>> key = enchantmentHolder.unwrapKey();
+                    if (key.isPresent()) {
+                        return key.get().identifier().getNamespace();
+                    }
+                }
+            } else if (item instanceof PotionItem || item instanceof TippedArrowItem) {
+                PotionContents potionContents = itemStack.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
+                Optional<Holder<Potion>> potionType = potionContents.potion();
+                Optional<ResourceKey<Potion>> key = potionType.flatMap(Holder::unwrapKey);
+                if (key.isPresent()) {
+                    return key.get().identifier().getNamespace();
+                }
+            } else if (item instanceof SpawnEggItem spawnEggItem) {
+                Optional<ResourceKey<EntityType<?>>> key = BuiltInRegistries.ENTITY_TYPE.getResourceKey(spawnEggItem.getType(itemStack));
+                if (key.isPresent()) {
+                    return key.get().identifier().getNamespace();
+                }
+            }
+        }
+        return modId;
+    }
+
+    /**
+     * Hook to fire {@link ItemAttributeModifierEvent}. Modders should use {@link ItemStack#forEachModifier(EquipmentSlot, BiConsumer)} instead.
+     */
+    public static ItemAttributeModifiers computeModifiedAttributes(ItemStack stack, ItemAttributeModifiers defaultModifiers) {
+        ItemAttributeModifierEvent event = new ItemAttributeModifierEvent(stack, defaultModifiers);
+        NeoForge.EVENT_BUS.post(event);
+        return event.build();
     }
 }

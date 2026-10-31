@@ -14,8 +14,8 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 /**
- * NeoForge's patch to {@code FishingRodItem}: {@code PlayerDestroyItemEvent} when reeling in breaks the rod. Not yet:
- * the rest of the patch ({@code canPerformAction} for the rod's item abilities, with the item extension in step 5).
+ * NeoForge's patch to {@code FishingRodItem}: {@code PlayerDestroyItemEvent} when reeling in breaks the rod. Its
+ * {@code canPerformAction} is in {@code ItemAbilityItemsMixin}.
  */
 @Mixin(FishingRodItem.class)
 abstract class FishingRodItemMixin {

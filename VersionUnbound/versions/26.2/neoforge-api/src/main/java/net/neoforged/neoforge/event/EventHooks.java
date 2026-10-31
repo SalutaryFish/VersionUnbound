@@ -103,6 +103,18 @@ import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.jetbrains.annotations.ApiStatus;
 import org.jspecify.annotations.Nullable;
+import net.minecraft.core.HolderLookup.RegistryLookup;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemInstance;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
+import net.minecraft.world.level.block.entity.FuelValues;
+import net.neoforged.neoforge.common.ItemAbility;
+import net.neoforged.neoforge.event.enchanting.GetEnchantmentLevelEvent;
+import net.neoforged.neoforge.event.furnace.FurnaceFuelBurnTimeEvent;
+import net.neoforged.neoforge.event.level.BlockEvent.BlockToolModificationEvent;
 
 // VersionUnbound: ported a feature at a time, like NeoForgeMod. The methods here are verbatim and in NeoForge's order;
 // the others arrive with their events (player, interaction and block events, living and entity events, spawning, items,
@@ -655,5 +667,52 @@ public class EventHooks {
 
     public static boolean onEffectRemoved(LivingEntity entity, MobEffectInstance effectInstance) {
         return NeoForge.EVENT_BUS.post(new MobEffectEvent.Remove(entity, effectInstance)).isCanceled();
+    }
+
+    @Nullable
+    public static BlockState onToolUse(BlockState originalState, UseOnContext context, ItemAbility itemAbility, boolean simulate) {
+        BlockToolModificationEvent event = new BlockToolModificationEvent(originalState, context, itemAbility, simulate);
+        return NeoForge.EVENT_BUS.post(event).isCanceled() ? null : event.getFinalState();
+    }
+
+    public static int getItemBurnTime(ItemStack itemStack, int burnTime, @Nullable RecipeType<?> recipeType, FuelValues fuelValues) {
+        FurnaceFuelBurnTimeEvent event = new FurnaceFuelBurnTimeEvent(itemStack, burnTime, recipeType, fuelValues);
+        NeoForge.EVENT_BUS.post(event);
+        return event.getBurnTime();
+    }
+
+    /**
+     * Fires {@link GetEnchantmentLevelEvent} and for all enchantments, returning the (possibly event-modified) enchantment map.
+     * 
+     * @param enchantments The original enchantment map as provided by the Item.
+     * @param stack        The stack being queried against.
+     * @return The new enchantment map.
+     */
+    public static ItemEnchantments getAllEnchantmentLevels(ItemEnchantments enchantments, ItemStack stack, RegistryLookup<Enchantment> lookup) {
+        var mutableEnchantments = new ItemEnchantments.Mutable(enchantments);
+        var event = new GetEnchantmentLevelEvent(stack, mutableEnchantments, null, lookup);
+        NeoForge.EVENT_BUS.post(event);
+        return mutableEnchantments.toImmutable();
+    }
+
+    /**
+     * Fires {@link GetEnchantmentLevelEvent} and for a single enchantment, returning the (possibly event-modified) level.
+     * 
+     * @param level The original level of the enchantment as provided by the Item.
+     * @param stack The stack being queried against.
+     * @param ench  The enchantment being queried for.
+     * @return The new level of the enchantment.
+     */
+    public static int getEnchantmentLevelSpecific(int level, ItemInstance stack, Holder<Enchantment> ench) {
+        RegistryLookup<Enchantment> lookup = ench.unwrapLookup();
+        if (lookup == null) { // Pretty sure this is never null, but I can't *prove* that it isn't.
+            return level;
+        }
+
+        var enchantments = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
+        enchantments.set(ench, level);
+        var event = new GetEnchantmentLevelEvent(stack, enchantments, ench, ench.unwrapLookup());
+        NeoForge.EVENT_BUS.post(event);
+        return enchantments.getLevel(ench);
     }
 }
