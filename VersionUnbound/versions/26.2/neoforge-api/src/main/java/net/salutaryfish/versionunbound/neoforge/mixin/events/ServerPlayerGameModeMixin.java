@@ -6,6 +6,7 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.Share;
+import com.llamalad7.mixinextras.sugar.ref.LocalBooleanRef;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -18,6 +19,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -42,11 +44,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * use-item results override vanilla's choices), and in {@code destroyBlock} the block state's {@code canHarvestBlock}
  * (a stand-in for the block extension's, whose default asks {@code PlayerEvent.HarvestCheck}) for the drops.
  *
- * <p>Not yet: the parts of the patch that call extension methods (Phase 2 step 5): {@code onItemUseFirst} and
- * {@code doesSneakBypassUse} in {@code useItemOn}, and in {@code destroyBlock} the removal through
- * {@code onDestroyedByPlayer} after the tool is used. Vanilla's behavior stands in, which is what the extension
- * methods' defaults do. Nor NeoForge's change to
- * {@code setGameModeForPlayer} that keeps a player flying.
+ * <p>Since step 5, the extension methods: {@code useItemOn} asks the stack's {@code onItemUseFirst} (which fires
+ * {@code UseItemOnBlockEvent} in its {@code ITEM_BEFORE_BLOCK} phase) before the block, and both hands'
+ * {@code doesSneakBypassUse} when sneaking; {@code destroyBlock} removes the block through the state's
+ * {@code onDestroyedByPlayer}, with whether the player harvests it. <b>Deviation:</b> NeoForge moves the removal after the
+ * tool's {@code mineBlock}; here it stays where vanilla removes the block (before the tool is used), because Fabric API
+ * injects its {@code PlayerBlockBreakEvents} at vanilla's {@code playerWillDestroy} and {@code destroy} calls there. The
+ * block still gets the tool as it was before the break, as in NeoForge, and {@code canHarvestBlock} is asked once (its
+ * answer is shared with the drops check). Not yet: NeoForge's change to {@code setGameModeForPlayer} that keeps a player
+ * flying.
  */
 @Mixin(ServerPlayerGameMode.class)
 abstract class ServerPlayerGameModeMixin {
@@ -82,11 +88,20 @@ abstract class ServerPlayerGameModeMixin {
         return !CommonHooks.fireBlockBreak(level, this.gameModeForPlayer, player, pos, state).isCanceled();
     }
 
+    // Neo: removal through onDestroyedByPlayer (NeoForge's removeBlock), told whether the player will harvest the block;
+    // with preventsBlockDrops (creative) it won't. The tool is the main hand before the break.
+    @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerLevel;removeBlock(Lnet/minecraft/core/BlockPos;Z)Z"))
+    private boolean versionunbound$destroyedByPlayer(ServerLevel level, BlockPos pos, boolean movedByPiston, Operation<Boolean> original,
+            @Local(name = "adjustedState") BlockState adjustedState, @Share("canHarvest") LocalBooleanRef canHarvest) {
+        canHarvest.set(!this.player.preventsBlockDrops() && adjustedState.canHarvestBlock(level, pos, this.player));
+        return adjustedState.onDestroyedByPlayer(level, pos, this.player, this.player.getMainHandItem().copy(), canHarvest.get(), level.getFluidState(pos));
+    }
+
     // Neo: the block decides whether the player gets the drops (previously player.hasCorrectToolForDrops(blockstate)); the
-    // block extension's default asks PlayerEvent.HarvestCheck.
+    // block extension's default asks PlayerEvent.HarvestCheck. Asked once, at the removal above.
     @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;hasCorrectToolForDrops(Lnet/minecraft/world/level/block/state/BlockState;)Z"))
-    private boolean versionunbound$canHarvestBlock(ServerPlayer player, BlockState adjustedState, Operation<Boolean> original, BlockPos pos) {
-        return adjustedState.canHarvestBlock(this.level, pos, player);
+    private boolean versionunbound$canHarvestBlock(ServerPlayer player, BlockState adjustedState, Operation<Boolean> original, @Share("canHarvest") LocalBooleanRef canHarvest) {
+        return canHarvest.get();
     }
 
     // Neo: Fire the PlayerDestroyItemEvent if the tool was broken at any point during the break process
@@ -110,6 +125,26 @@ abstract class ServerPlayerGameModeMixin {
             CallbackInfoReturnable<InteractionResult> cir, @Share("rightClickBlock") LocalRef<PlayerInteractEvent.RightClickBlock> event) {
         event.set(CommonHooks.onRightClickBlock(player, hand, hitResult.getBlockPos(), hitResult));
         if (event.get().isCanceled()) cir.setReturnValue(event.get().getCancellationResult());
+    }
+
+    // Neo: the stack's onItemUseFirst (UseItemOnBlockEvent's ITEM_BEFORE_BLOCK phase, then the item) comes before the
+    // block, unless the event denies the item; anything but PASS ends the use. After the spectator branch, at the
+    // first read of the main hand.
+    @Inject(method = "useItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;getMainHandItem()Lnet/minecraft/world/item/ItemStack;", ordinal = 0), cancellable = true)
+    private void versionunbound$itemUseFirst(ServerPlayer player, Level level, ItemStack itemStack, InteractionHand hand, BlockHitResult hitResult,
+            CallbackInfoReturnable<InteractionResult> cir, @Share("rightClickBlock") LocalRef<PlayerInteractEvent.RightClickBlock> event) {
+        if (event.get().getUseItem() != TriState.FALSE) {
+            InteractionResult result = itemStack.onItemUseFirst(new UseOnContext(player, hand, hitResult));
+            if (result != InteractionResult.PASS) cir.setReturnValue(result);
+        }
+    }
+
+    // Neo: sneaking doesn't suppress the block when both hands' items let sneaking bypass.
+    @ModifyExpressionValue(method = "useItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerPlayer;isSecondaryUseActive()Z"))
+    private boolean versionunbound$sneakBypassUse(boolean secondaryUse, @Local(argsOnly = true) ServerPlayer player, @Local(argsOnly = true) Level level,
+            @Local(argsOnly = true) BlockHitResult hitResult) {
+        BlockPos pos = hitResult.getBlockPos();
+        return secondaryUse && !(player.getMainHandItem().doesSneakBypassUse(level, pos, player) && player.getOffhandItem().doesSneakBypassUse(level, pos, player));
     }
 
     // NeoForge uses the block if its use-block result is TRUE, or DEFAULT and vanilla wouldn't suppress it; that is,

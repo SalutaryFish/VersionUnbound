@@ -12,6 +12,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -196,8 +197,9 @@ final class ClientEvents {
             if (event.getLevel().isClientSide()) leftClickAction = event.getAction();
         });
         bus.addListener(BreakBlockEvent.class, event -> {
-            // The client would remove the block without telling the server, so keep it.
-            if (!event.getLevel().isClientSide()) return;
+            // The client would remove the block without telling the server, so keep it. Only vanilla's blocks: the hooks
+            // testmod breaks its own block on the client.
+            if (!event.getLevel().isClientSide() || !BuiltInRegistries.BLOCK.getKey(event.getState().getBlock()).getNamespace().equals("minecraft")) return;
             breakPos = event.getPos();
             event.setCanceled(true);
         });
@@ -272,14 +274,14 @@ final class ClientEvents {
                 destroyedItem != null && destroyedItem.getEntity() == player && destroyedItem.getHand() == InteractionHand.MAIN_HAND
                         && destroyedItem.getOriginal().is(EventsMod.VANISHING_ITEM.get()) && player.getMainHandItem().isEmpty());
 
-        // A block item used on the ground, in the hand on the client only: UseItemOnBlockEvent for the block, then for the item.
+        // A block item used on the ground, in the hand on the client only: UseItemOnBlockEvent for the item (before the block), the block, then the item.
         player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.STONE));
         useItemOnBlockPos = ground;
         InteractionResult refusedUse = gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
         useItemOnBlockPos = null;
         player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-        CHECKS.check("UseItemOnBlockEvent fires on the client for the block, then for the item", useItemOnBlockPhases,
-                List.of(UseItemOnBlockEvent.UsePhase.BLOCK, UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK));
+        CHECKS.check("UseItemOnBlockEvent fires on the client for the item first, then the block, then the item", useItemOnBlockPhases,
+                List.of(UseItemOnBlockEvent.UsePhase.ITEM_BEFORE_BLOCK, UseItemOnBlockEvent.UsePhase.BLOCK, UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK));
         CHECKS.check("canceling UseItemOnBlockEvent on the client returns its cancellation result", refusedUse, InteractionResult.FAIL);
 
         gameMode.startDestroyBlock(ground, Direction.UP);

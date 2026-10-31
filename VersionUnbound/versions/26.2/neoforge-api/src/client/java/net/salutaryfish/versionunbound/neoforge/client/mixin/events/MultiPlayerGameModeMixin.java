@@ -20,9 +20,12 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.event.EventHooks;
@@ -36,6 +39,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -46,9 +50,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * ({@code ServerPlayerGameModeMixin}).
  *
  * <p>Several of these sit in the lambdas vanilla hands to {@code startPrediction}, which runs them right away; they are
- * targeted by their names in the 26.2 jar. Not yet: the parts that call extension methods (Phase 2 step 5):
- * {@code onDestroyedByPlayer} in {@code destroyBlock}, {@code onItemUseFirst} and {@code doesSneakBypassUse} in
- * {@code performUseItemOn}, {@code shouldCauseBlockBreakReset} and the client block extensions' hit sound.
+ * targeted by their names in the 26.2 jar. Since step 5, the extension methods: {@code destroyBlock} removes the block
+ * through the state's {@code onDestroyedByPlayer} (never harvesting, as in NeoForge) and hands {@code destroy} the state
+ * {@code playerWillDestroy} answered; {@code performUseItemOn} asks the stack's {@code onItemUseFirst} before the block,
+ * and decides whether there's something in the hands by {@code doesSneakBypassUse} (NeoForge's client patch; the server's
+ * differs). Not yet: {@code shouldCauseBlockBreakReset} and the client block extensions' hit sound.
  * {@code PlayerDestroyItemEvent} fires when using an item (not on a block) leaves the hand empty, as in NeoForge.
  */
 @Mixin(MultiPlayerGameMode.class)
@@ -79,6 +85,25 @@ abstract class MultiPlayerGameModeMixin {
     @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;canDestroyBlock(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;)Z"))
     private boolean versionunbound$ignoreCanDestroyBlock(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, Operation<Boolean> original) {
         return true;
+    }
+
+    @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/Block;playerWillDestroy(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/entity/player/Player;)Lnet/minecraft/world/level/block/state/BlockState;"))
+    private BlockState versionunbound$rememberRemovedState(Block block, Level level, BlockPos pos, BlockState state, Player player, Operation<BlockState> original,
+            @Share("removedState") LocalRef<BlockState> removedState) {
+        BlockState removed = original.call(block, level, pos, state, player);
+        removedState.set(removed);
+        return removed;
+    }
+
+    @WrapOperation(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z"))
+    private boolean versionunbound$destroyedByPlayer(Level level, BlockPos pos, BlockState fluidBlock, int flags, Operation<Boolean> original,
+            @Local(name = "oldState") BlockState oldState, @Local(name = "fluidState") FluidState fluidState) {
+        return oldState.onDestroyedByPlayer(level, pos, this.minecraft.player, this.minecraft.player.getMainHandItem().copy(), false, fluidState);
+    }
+
+    @ModifyArg(method = "destroyBlock", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/Block;destroy(Lnet/minecraft/world/level/LevelAccessor;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)V"), index = 2)
+    private BlockState versionunbound$destroyRemovedState(BlockState oldState, @Share("removedState") LocalRef<BlockState> removedState) {
+        return removedState.get();
     }
 
     // Creative: the block breaks right away unless the left click is canceled, in startDestroyBlock and in
@@ -127,6 +152,26 @@ abstract class MultiPlayerGameModeMixin {
         if (event.get().isCanceled()) {
             cir.setReturnValue(event.get().getCancellationResult());
         }
+    }
+
+    // Neo: the stack's onItemUseFirst before the block, unless the event denies the item; anything but PASS ends the
+    // use. After the spectator check, at the first read of the main hand.
+    @Inject(method = "performUseItemOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getMainHandItem()Lnet/minecraft/world/item/ItemStack;", ordinal = 0), cancellable = true)
+    private void versionunbound$itemUseFirst(LocalPlayer player, InteractionHand hand, BlockHitResult blockHit, CallbackInfoReturnable<InteractionResult> cir,
+            @Local(ordinal = 0) ItemStack itemStack, @Share("rightClickBlock") LocalRef<PlayerInteractEvent.RightClickBlock> event) {
+        if (event.get().getUseItem() != TriState.FALSE) {
+            InteractionResult result = itemStack.onItemUseFirst(new UseOnContext(player, hand, blockHit));
+            if (result != InteractionResult.PASS) cir.setReturnValue(result);
+        }
+    }
+
+    // Neo: something is in the hands unless its item lets sneaking bypass (an empty hand does); vanilla's isEmpty().
+    @WrapOperation(method = "performUseItemOn", at = {
+            @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;isEmpty()Z", ordinal = 0),
+            @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;isEmpty()Z", ordinal = 1) })
+    private boolean versionunbound$sneakBypassUse(ItemStack stack, Operation<Boolean> original, @Local(argsOnly = true) LocalPlayer player,
+            @Local(argsOnly = true) BlockHitResult blockHit) {
+        return stack.doesSneakBypassUse(player.level(), blockHit.getBlockPos(), player);
     }
 
     @ModifyVariable(method = "performUseItemOn", at = @At("STORE"), ordinal = 1)

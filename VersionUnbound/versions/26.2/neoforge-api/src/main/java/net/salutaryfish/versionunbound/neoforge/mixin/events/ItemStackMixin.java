@@ -3,16 +3,20 @@ package net.salutaryfish.versionunbound.neoforge.mixin.events;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import net.minecraft.core.BlockPos;
 import net.minecraft.stats.Stat;
+import net.minecraft.stats.Stats;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.block.state.pattern.BlockInWorld;
 import net.neoforged.neoforge.common.CommonHooks;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -32,9 +36,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * same predicate, so it changes nothing), and the hook awards the item use stat on the server, as in NeoForge (for every
  * use that consumes the action, where vanilla only counts item interactions), so vanilla's award stays on the client.
  *
- * <p>Not ported from this patch: {@code onItemUseFirst}, which fires the {@code ITEM_BEFORE_BLOCK} phase (it overrides an
- * item stack extension method, Phase 2 step 5), and the other hunks (item extension methods, tooltips, attribute
- * modifiers, template comparisons).
+ * <p>Since step 5, NeoForge's {@code onItemUseFirst} override (of the item stack extension's): {@code UseItemOnBlockEvent}
+ * in its {@code ITEM_BEFORE_BLOCK} phase, then the adventure mode check and the item's {@code onItemUseFirst}, with the
+ * use stat as for {@code useOn} (NeoForge's shared {@code onItemUse}; game modes call it before the block). Not ported
+ * from this patch: the other hunks (item extension methods, tooltips, attribute modifiers, template comparisons).
  */
 @Mixin(ItemStack.class)
 abstract class ItemStackMixin {
@@ -53,5 +58,30 @@ abstract class ItemStackMixin {
     @WrapWithCondition(method = "useOn", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;awardStat(Lnet/minecraft/stats/Stat;)V"))
     private boolean versionunbound$awardOnClientOnly(Player player, Stat<?> stat) {
         return player.level().isClientSide();
+    }
+
+    @Shadow
+    public abstract boolean canPlaceOnBlockInAdventureMode(BlockInWorld blockInWorld);
+
+    @Shadow
+    public abstract Item getItem();
+
+    // NeoForge's override of IItemStackExtension.onItemUseFirst, with its onItemUse body.
+    public InteractionResult onItemUseFirst(UseOnContext context) {
+        var e = NeoForge.EVENT_BUS.post(new UseItemOnBlockEvent(context, UseItemOnBlockEvent.UsePhase.ITEM_BEFORE_BLOCK));
+        if (e.isCanceled()) return e.getCancellationResult();
+        Player player = context.getPlayer();
+        BlockPos pos = context.getClickedPos();
+        if (player != null && !player.getAbilities().mayBuild && !this.canPlaceOnBlockInAdventureMode(new BlockInWorld(context.getLevel(), pos, false))) {
+            return InteractionResult.PASS;
+        }
+
+        Item usedItem = this.getItem();
+        InteractionResult result = usedItem.onItemUseFirst((ItemStack) (Object) this, context);
+        if (player != null && result instanceof InteractionResult.Success success && success.wasItemInteraction()) {
+            player.awardStat(Stats.ITEM_USED.get(usedItem));
+        }
+
+        return result;
     }
 }

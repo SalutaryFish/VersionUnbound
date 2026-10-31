@@ -5,12 +5,15 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import org.jspecify.annotations.Nullable;
 
 /** This mod's blocks, each overriding block extension methods vanilla's code should ask. */
@@ -58,6 +61,24 @@ final class HookBlocks {
         @Override
         public boolean onCaughtFire(BlockState state, Level level, BlockPos pos, @Nullable Direction direction, @Nullable LivingEntity igniter) {
             CAUGHT_FIRE.add(new CaughtFire(pos.immutable(), direction));
+            return false;
+        }
+    }
+
+    /** A removal onDestroyedByPlayer heard. */
+    record DestroyedByPlayer(BlockPos pos, ItemStack tool, boolean willHarvest, boolean clientSide) {}
+
+    static final List<DestroyedByPlayer> DESTROYED_BY_PLAYER = new ArrayList<>();
+
+    /** Refuses to be removed by a player. */
+    static final class StubbornBlock extends Block {
+        StubbornBlock(Properties properties) {
+            super(properties);
+        }
+
+        @Override
+        public boolean onDestroyedByPlayer(BlockState state, Level level, BlockPos pos, Player player, ItemStack toolStack, boolean willHarvest, FluidState fluid) {
+            DESTROYED_BY_PLAYER.add(new DestroyedByPlayer(pos.immutable(), toolStack, willHarvest, level.isClientSide()));
             return false;
         }
     }

@@ -3,6 +3,7 @@ package net.salutaryfish.versionunbound.testmod.hooks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
@@ -14,8 +15,9 @@ import org.slf4j.Logger;
 
 /**
  * Checks the vanilla call sites of NeoForge's extension methods (step 5): this mod's blocks and items override them,
- * and vanilla's code has to ask. The checks run at server started, near the top of the world in chunk -1,-1 (the
- * registries testmod's checks use x = z = -8 there; these use z = -12).
+ * and vanilla's code has to ask. The world checks run at server started, near the top of the world in chunk -1,-1 (the
+ * registries testmod's checks use x = z = -8 there; these use z = -12); the player checks (PlayerChecks, ClientChecks)
+ * with the first player that joins.
  */
 @Mod(HooksMod.MOD_ID)
 public final class HooksMod {
@@ -30,14 +32,26 @@ public final class HooksMod {
     /** TNT whose onCaughtFire refuses to prime. */
     static final DeferredBlock<HookBlocks.DudTnt> DUD_TNT = BLOCKS.registerBlock("dud_tnt", HookBlocks.DudTnt::new);
 
+    /** Refuses to be removed by a player (onDestroyedByPlayer). */
+    static final DeferredBlock<HookBlocks.StubbornBlock> STUBBORN_BLOCK = BLOCKS.registerBlock("stubborn_block", HookBlocks.StubbornBlock::new);
+
     private static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MOD_ID);
     /** Not shears, but can carve pumpkins and trim plants. */
     static final DeferredItem<HookItems.CarvingKnife> CARVING_KNIFE = ITEMS.registerItem("carving_knife", HookItems.CarvingKnife::new);
 
-    public HooksMod(IEventBus modBus) {
+    /** Uses itself before the block (onItemUseFirst). */
+    static final DeferredItem<HookItems.FirstUser> FIRST_USER = ITEMS.registerItem("first_user", HookItems.FirstUser::new);
+    /** Lets a sneaking player use blocks (doesSneakBypassUse). */
+    static final DeferredItem<HookItems.SneakPass> SNEAK_PASS = ITEMS.registerItem("sneak_pass", HookItems.SneakPass::new);
+
+    public HooksMod(IEventBus modBus, Dist dist) {
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         FireChecks.register();
+        PlayerChecks.register();
+        if (dist.isClient()) {
+            ClientChecks.register();
+        }
         NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
             ServerLevel level = event.getServer().overworld();
             Checks checks = new Checks("server checks");

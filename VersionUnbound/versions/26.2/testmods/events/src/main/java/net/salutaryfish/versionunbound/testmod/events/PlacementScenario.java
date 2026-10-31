@@ -59,7 +59,7 @@ import org.jspecify.annotations.Nullable;
  * refuses a named stack). NeoForge's members on {@code Level} that mods use directly, found by name as a mod's
  * bytecode finds them: {@code markAndNotifyBlock}, {@code captureBlockSnapshots} with {@code capturedBlockSnapshots},
  * and {@code restoringBlockSnapshots}. An enderman putting down the block it carries. With the player
- * ({@link #runWithPlayer}): placing through {@code ServerPlayerGameMode.useItemOn}, with both phases of
+ * ({@link #runWithPlayer}): placing through {@code ServerPlayerGameMode.useItemOn}, with the three phases of
  * {@code UseItemOnBlockEvent}, the item use stat, the last item of a stack ({@code PlayerDestroyItemEvent}) and
  * canceling. The listeners only look at the scenario's own blocks and entities.
  */
@@ -342,8 +342,8 @@ final class PlacementScenario {
             clear();
             InteractionResult result = useItemOn(player, level, support);
             // For a player the event's placed block is the block now in the level.
-            playerChecks.check("a player placing a block fires UseItemOnBlockEvent for the block, then for the item, then EntityPlaceEvent with the player and the placed block",
-                    phases.equals(List.of(UseItemOnBlockEvent.UsePhase.BLOCK, UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK))
+            playerChecks.check("a player placing a block fires UseItemOnBlockEvent for the item before the block, the block, then the item, then EntityPlaceEvent with the player and the placed block",
+                    phases.equals(List.of(UseItemOnBlockEvent.UsePhase.ITEM_BEFORE_BLOCK, UseItemOnBlockEvent.UsePhase.BLOCK, UseItemOnBlockEvent.UsePhase.ITEM_AFTER_BLOCK))
                             && placements.equals(List.of(new Placement(false, player, target, List.of(target), AIR, STONE, STONE, STONE, ITEM_FLAGS)))
                             && result.consumesAction() && player.getMainHandItem().getCount() == 1);
             playerChecks.check("placing a block counts the item's use once", player.getStats().getValue(Stats.ITEM_USED.get(Items.STONE)) - used, 1);
@@ -381,7 +381,7 @@ final class PlacementScenario {
             InteractionResult blockedResult = useItemOn(player, level, blockedSupport);
             canceledPhase = null;
             playerChecks.check("canceling UseItemOnBlockEvent for the block returns its cancellation result, without using the item",
-                    phases.equals(List.of(UseItemOnBlockEvent.UsePhase.BLOCK)) && blockedResult == InteractionResult.SUCCESS && placements.isEmpty()
+                    phases.equals(List.of(UseItemOnBlockEvent.UsePhase.ITEM_BEFORE_BLOCK, UseItemOnBlockEvent.UsePhase.BLOCK)) && blockedResult == InteractionResult.SUCCESS && placements.isEmpty()
                             && level.getBlockState(blocked).isAir() && player.getMainHandItem().getCount() == 2);
         } finally {
             area = null;
