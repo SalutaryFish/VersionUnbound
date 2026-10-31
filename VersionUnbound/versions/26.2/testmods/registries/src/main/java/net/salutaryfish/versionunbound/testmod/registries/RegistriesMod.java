@@ -164,6 +164,7 @@ public class RegistriesMod {
         EntityChecks.register(modBus);
         NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
             EntityChecks.checkWorld(worldChecks, event.getServer().overworld());
+            AccessChecks.checkWorld(worldChecks, event.getServer().overworld());
             worldChecks.summarize();
         });
     }
@@ -297,6 +298,7 @@ public class RegistriesMod {
                 && PoiTypes.forState(Blocks.DRIED_KELP_BLOCK.defaultBlockState()).isPresent());
 
         EntityChecks.checkRegistration(CHECKS);
+        AccessChecks.checkRegistration(CHECKS);
     }
 
     /** Called by the mixin when a server is about to load its world; the world checks summarize once it has started. */
