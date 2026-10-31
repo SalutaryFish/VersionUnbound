@@ -14,13 +14,19 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
  */
 public interface AttributeSupplierBuilderExtension {
     /**
-     * Stands in for NeoForge's {@code Builder(AttributeSupplier)} constructor, which Layer A doesn't add to vanilla's class
-     * (no mod in the corpus calls it): a builder that starts out with the supplier's attribute instances.
+     * Stands in for NeoForge's {@code Builder(AttributeSupplier)} constructor for Layer A's own code, which compiles
+     * against vanilla's class: a builder that starts out with the supplier's attribute instances. Mods call the
+     * constructor itself, which {@code AddedStaticMethods} adds and which runs {@link #init}.
      */
     static AttributeSupplier.Builder copyOf(AttributeSupplier attributeMap) {
         AttributeSupplier.Builder builder = new AttributeSupplier.Builder();
-        ((Entries) builder).versionunbound$instances().putAll(attributeMap.instances);
+        init(builder, attributeMap);
         return builder;
+    }
+
+    /** The body of NeoForge's {@code Builder(AttributeSupplier)} constructor, after the no-argument constructor ran. */
+    static void init(AttributeSupplier.Builder builder, AttributeSupplier attributeMap) {
+        ((Entries) builder).versionunbound$instances().putAll(attributeMap.instances);
     }
 
     private Entries entries() {

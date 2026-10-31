@@ -9,9 +9,9 @@ import net.neoforged.neoforge.event.entity.RegisterSpawnPlacementsEvent;
 import org.jetbrains.annotations.ApiStatus;
 
 /**
- * The static methods NeoForge's patch adds to {@link SpawnPlacements}, which a mixin can't add (see the handoff's Known
- * gap 15): Layer A calls them here, and a mod calling them on {@code SpawnPlacements} gets {@code NoSuchMethodError}. The
- * bodies are NeoForge's; the class tweaker opens {@code DATA_BY_TYPE} and {@code SpawnPlacements.Data} to them.
+ * The static methods NeoForge's patch adds to {@link SpawnPlacements}. {@code AddedStaticMethods} adds them there as
+ * forwarders to these; Layer A's own code, compiled against vanilla's class, calls these directly. The bodies are
+ * NeoForge's; the class tweaker opens {@code DATA_BY_TYPE} and {@code SpawnPlacements.Data} to them.
  */
 public final class SpawnPlacementsPatch {
     private SpawnPlacementsPatch() {}

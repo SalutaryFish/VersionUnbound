@@ -9,8 +9,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.ExtraCodecs;
 
 /**
- * The static method NeoForge's patch adds to {@link RegistryOps}. NeoForge's code that calls
- * {@code RegistryOps.retrieveRegistryLookup} calls this instead.
+ * The static method NeoForge's patch adds to {@link RegistryOps}. {@code AddedStaticMethods} adds it there as a
+ * forwarder to this one; Layer A's own code, compiled against vanilla's class, calls this directly.
  */
 public final class RegistryOpsPatch {
     private RegistryOpsPatch() {}
