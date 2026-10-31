@@ -1,13 +1,18 @@
 package net.salutaryfish.versionunbound.testmod.hooks;
 
 import com.mojang.logging.LogUtils;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredBlock;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -42,6 +47,13 @@ public final class HooksMod {
     static final DeferredBlock<HookBlocks.Thorns> THORNS = BLOCKS.registerBlock("thorns", HookBlocks.Thorns::new, properties -> properties.noCollision());
     static final DeferredBlock<HookBlocks.Listener> LISTENER = BLOCKS.registerBlock("listener", HookBlocks.Listener::new);
 
+    /** A block entity that records the block entity extension's calls (HookBlockEntities). */
+    static final DeferredBlock<HookBlockEntities.RecorderBlock> RECORDER = BLOCKS.registerBlock("recorder", HookBlockEntities.RecorderBlock::new);
+
+    private static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITY_TYPES = DeferredRegister.create(Registries.BLOCK_ENTITY_TYPE, MOD_ID);
+    static final DeferredHolder<BlockEntityType<?>, BlockEntityType<HookBlockEntities.Recorder>> RECORDER_TYPE = BLOCK_ENTITY_TYPES.register("recorder",
+            () -> new BlockEntityType<>(HookBlockEntities.Recorder::new, Set.of(RECORDER.get())));
+
     private static final DeferredRegister.Items ITEMS = DeferredRegister.createItems(MOD_ID);
     /** Not shears, but can carve pumpkins and trim plants. */
     static final DeferredItem<HookItems.CarvingKnife> CARVING_KNIFE = ITEMS.registerItem("carving_knife", HookItems.CarvingKnife::new);
@@ -54,22 +66,29 @@ public final class HooksMod {
     static final DeferredItem<HookItems.Ember> EMBER = ITEMS.registerItem("ember", HookItems.Ember::new);
     static final DeferredItem<HookItems.Wand> WAND = ITEMS.registerItem("wand", HookItems.Wand::new);
 
+    private static final Checks SERVER_CHECKS = new Checks("server checks");
+
     public HooksMod(IEventBus modBus, Dist dist) {
         BLOCKS.register(modBus);
+        BLOCK_ENTITY_TYPES.register(modBus);
         ITEMS.register(modBus);
         FireChecks.register();
         PlayerChecks.register();
         if (dist.isClient()) {
             ClientChecks.register();
         }
+        // The world checks run at server started; the block entity checks finish on the first server tick (onLoad),
+        // and the group summarizes then.
         NeoForge.EVENT_BUS.addListener(ServerStartedEvent.class, event -> {
             ServerLevel level = event.getServer().overworld();
-            Checks checks = new Checks("server checks");
             BlockPos origin = new BlockPos(-8, level.getMaxY() - 8, -12);
-            FireChecks.check(checks, level, origin);
-            BlockChecks.check(checks, level, origin);
-            ItemChecks.check(checks, level, origin);
-            checks.summarize();
+            FireChecks.check(SERVER_CHECKS, level, origin);
+            BlockChecks.check(SERVER_CHECKS, level, origin);
+            ItemChecks.check(SERVER_CHECKS, level, origin);
+            BlockEntityChecks.start(SERVER_CHECKS, level, origin);
+        });
+        NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class, event -> {
+            if (BlockEntityChecks.finish(SERVER_CHECKS, event.getServer().overworld())) SERVER_CHECKS.summarize();
         });
     }
 

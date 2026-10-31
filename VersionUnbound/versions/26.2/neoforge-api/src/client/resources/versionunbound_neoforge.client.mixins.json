@@ -12,7 +12,8 @@
     "events.ClientPacketListenerMixin",
     "events.IntegratedServerMixin",
     "events.MinecraftMixin",
-    "events.MultiPlayerGameModeMixin"
+    "events.MultiPlayerGameModeMixin",
+    "patches.ClientPacketListenerBlockEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1

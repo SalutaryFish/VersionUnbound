@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.UseItemOnBlockEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.jspecify.annotations.Nullable;
 
@@ -24,7 +25,8 @@ import org.jspecify.annotations.Nullable;
  * {@code useItemOn} asks the stack's {@code onItemUseFirst} (with {@code UseItemOnBlockEvent}'s {@code ITEM_BEFORE_BLOCK})
  * before the block and both hands' {@code doesSneakBypassUse} when sneaking, and {@code destroyBlock} removes the block
  * through {@code onDestroyedByPlayer}. The uses pass stacks to {@code useItemOn} rather than putting them in the hand,
- * except for the sneak check, which reads the hands (and puts them back).
+ * except for the sneak check, which reads the hands (and puts them back). Then it places the recorder block entity near the
+ * player (6 blocks back on x and z, 4 up) for ClientChecks (removed at server stopping).
  */
 final class PlayerChecks {
     private PlayerChecks() {}
@@ -35,6 +37,7 @@ final class PlayerChecks {
     private static boolean cancelBeforeBlock;
     private static @Nullable ServerPlayer player;
     private static int ticksUntilRun = -1;
+    private static @Nullable BlockPos recorderPos;
 
     static void register() {
         NeoForge.EVENT_BUS.addListener(PlayerEvent.PlayerLoggedInEvent.class, event -> {
@@ -64,6 +67,17 @@ final class PlayerChecks {
                 HooksMod.clear(level, pos);
             }
             checks.summarize();
+            // For ClientChecks: a block entity near the player, whose update the client hears (onLoad, onDataPacket).
+            // Off the events testmod's player scenario, which builds from 3 blocks above the player towards +x and +z.
+            BlockPos recorder = target.blockPosition().offset(-6, 4, -6);
+            if (level.getBlockState(recorder).isAir()) {
+                level.setBlock(recorder, HooksMod.RECORDER.get().defaultBlockState(), 3);
+                recorderPos = recorder;
+            }
+        });
+        NeoForge.EVENT_BUS.addListener(ServerStoppingEvent.class, event -> {
+            BlockPos recorder = recorderPos;
+            if (recorder != null) event.getServer().overworld().setBlock(recorder, Blocks.AIR.defaultBlockState(), 3);
         });
     }
 

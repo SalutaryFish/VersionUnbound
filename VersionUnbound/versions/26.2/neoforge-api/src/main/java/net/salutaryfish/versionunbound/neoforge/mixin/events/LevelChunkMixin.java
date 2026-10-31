@@ -14,9 +14,10 @@ import org.spongepowered.asm.mixin.injection.At;
 /**
  * NeoForge's patch to {@code LevelChunk}, for {@code BlockEvent.EntityPlaceEvent}: while the level captures block
  * snapshots, {@code setBlockState} doesn't run the new state's {@code onPlace}, which {@code CommonHooks.onPlaceItemIntoWorld}
- * runs once the event lets the placement stand (see {@code LevelMixin}). Not ported from this patch: the light
- * properties check with the position, block entities' {@code onLoad} and {@code onChunkUnloaded}, the update tag, the
- * auxiliary light manager, attachments, and catching a block entity's exception on save (step 5 and later).
+ * runs once the event lets the placement stand (see {@code LevelMixin}). Block entities' {@code onLoad} and
+ * {@code onChunkUnloaded} and the update tag are LevelChunkBlockEntitiesMixin's (step 5). Not ported from this patch: the
+ * light properties check with the position, the auxiliary light manager, attachments, keeping a removed block entity in
+ * {@code getBlockEntity}, and catching a block entity's exception on save.
  */
 @Mixin(LevelChunk.class)
 abstract class LevelChunkMixin {

@@ -79,6 +79,9 @@ final class ClientChecks {
         } finally {
             minecraft.level.setBlock(above, old.isAir() ? Blocks.AIR.defaultBlockState() : old, 2 | 16);
         }
+        // The recorder the server placed above the player when it joined (PlayerChecks).
+        checks.check("a block entity the server adds near the player hears onLoad and onDataPacket (with its update tag) on the client",
+                HookBlockEntities.HEARD.contains("onLoad client") && HookBlockEntities.HEARD.contains("onDataPacket client 42"));
         checks.summarize();
     }
 }
