@@ -61,6 +61,7 @@ final class PlayerScenario {
     private final Map<Entity, Integer> joins;
     private final Map<Entity, Integer> leaves;
     private final DamageScenario damage;
+    private final EquipmentScenario equipment;
     private final ItemScenario items;
     private final DestroyItemScenario destroyedItems;
     private final ProjectileScenario projectiles;
@@ -112,13 +113,14 @@ final class PlayerScenario {
     private Player respawned;
     private boolean respawnEndConquered;
 
-    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, ItemScenario items,
+    PlayerScenario(Checks checks, Map<Entity, Integer> joins, Map<Entity, Integer> leaves, DamageScenario damage, EquipmentScenario equipment, ItemScenario items,
             DestroyItemScenario destroyedItems, ProjectileScenario projectiles, TeleportScenario teleports, SurvivalScenario survival, SpawnScenario spawns,
             TameScenario tames, BlockScenario blocks, LevelScenario levelEvents, PlayerEventScenario playerEvents, PlacementScenario placements) {
         this.checks = checks;
         this.joins = joins;
         this.leaves = leaves;
         this.damage = damage;
+        this.equipment = equipment;
         this.items = items;
         this.destroyedItems = destroyedItems;
         this.projectiles = projectiles;
@@ -319,9 +321,11 @@ final class PlayerScenario {
             level.removeBlock(pos, false);
         }
 
-        // Picking up and tossing items (ItemScenario), and items breaking or being used up (DestroyItemScenario).
+        // Picking up and tossing items (ItemScenario), items breaking or being used up (DestroyItemScenario), and shields,
+        // armor and flying players' falls (EquipmentScenario).
         items.runWithPlayer(player, level, base);
         destroyedItems.runWithPlayer(player, level, base);
+        equipment.runWithPlayer(player, level);
 
         // A death the listener cancels (ServerPlayer overrides LivingEntity.die).
         cancelDeath = true;

@@ -42,6 +42,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.EnderMan;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.BlocksAttacks;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.gameevent.GameEvent;
 import net.neoforged.neoforge.common.CommonHooks;
@@ -53,7 +54,9 @@ import net.neoforged.neoforge.event.entity.living.EffectParticleModificationEven
 import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
 import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.LivingShieldBlockEvent;
 import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
+import net.salutaryfish.versionunbound.neoforge.patches.BlocksAttacksPatch;
 import net.salutaryfish.versionunbound.neoforge.patches.EntityDropsCapture;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityDamageContainers;
 import net.salutaryfish.versionunbound.neoforge.patches.LivingEntityRandomTeleport;
@@ -89,10 +92,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>{@code hurtServer} keeps vanilla's code with NeoForge's additions injected; one difference is that vanilla sets
  * {@code lastHurt} and the invulnerability ticks before {@code actuallyHurt} in the normal case (NeoForge after), so
  * they already have their new values during {@code LivingDamageEvent.Pre}; the ticks end up as the container says.
- * {@code actuallyHurt} is replaced by NeoForge's version. Not yet: {@code onDamageTaken} (the living entity extension,
- * Phase 2 step 5), the shield event ({@code LivingShieldBlockEvent} in {@code applyItemBlocking}, which needs
- * NeoForge's six-argument {@code BlocksAttacks.hurtBlockingItem}), and the armor durability event
- * ({@code ArmorHurtEvent} in {@code doHurtEquipment}).
+ * {@code actuallyHurt} is replaced by NeoForge's version. Blocking: {@code LivingShieldBlockEvent} in
+ * {@code applyItemBlocking}, with the shield's bypass check moved into it (its original block state), and the shield
+ * damaged through NeoForge's six-argument {@code BlocksAttacks.hurtBlockingItem} ({@code BlocksAttacksMixin}); armor:
+ * {@code ArmorHurtEvent} in place of {@code doHurtEquipment}'s loop. Not yet: {@code onDamageTaken} (the living entity
+ * extension, Phase 2 step 5).
  */
 @Mixin(LivingEntity.class)
 abstract class LivingEntityMixin implements LivingEntityDamageContainers, LivingEntityRandomTeleport {
@@ -223,6 +227,45 @@ abstract class LivingEntityMixin implements LivingEntityDamageContainers, Living
         // VersionUnbound: this.onDamageTaken(container) comes with the living entity extension (Phase 2 step 5).
         CommonHooks.onLivingDamagePost((LivingEntity) (Object) this, this.damageContainers.peek());
         this.damageContainers.pop();
+    }
+
+    // Neo: the shield's bypass check moves into LivingShieldBlockEvent (as its original block state), so damage that
+    // bypasses the shield gets as far as the event, which can still block it.
+    @ModifyExpressionValue(method = "applyItemBlocking", at = @At(value = "INVOKE", target = "Ljava/util/Optional;orElse(Ljava/lang/Object;)Ljava/lang/Object;"))
+    private Object versionunbound$shieldBypass(Object bypassed, @Share("shieldBypassed") LocalBooleanRef shieldBypassed) {
+        shieldBypassed.set((Boolean) bypassed);
+        return Boolean.FALSE;
+    }
+
+    // Neo: LivingShieldBlockEvent once the blocked damage is known, before the shield takes durability damage. Not
+    // blocked: nothing is blocked; otherwise the event's blocked damage, and its shield damage for the shield.
+    @WrapOperation(method = "applyItemBlocking", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/component/BlocksAttacks;hurtBlockingItem(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/InteractionHand;F)V"))
+    private void versionunbound$shieldBlock(BlocksAttacks blocksAttacks, Level level, ItemStack blockingWith, LivingEntity user, InteractionHand hand, float damageBlocked,
+            Operation<Void> original, @Local(argsOnly = true) DamageSource source, @Local(argsOnly = true) float damage,
+            @Local(name = "damageBlocked") LocalFloatRef blocked, @Share("shieldBypassed") LocalBooleanRef shieldBypassed,
+            @Cancellable CallbackInfoReturnable<Float> cir) {
+        DamageContainer damageContainer = this.damageContainers.empty() ? new DamageContainer(source, damage) : this.damageContainers.peek();
+        LivingShieldBlockEvent ev = CommonHooks.onDamageBlock((LivingEntity) (Object) this, damageContainer, damageBlocked, !shieldBypassed.get());
+        if (!ev.getBlocked()) {
+            cir.setReturnValue(0.0F);
+            return;
+        }
+
+        // Read before setBlockedDamage, which takes it off the container (and getBlockedDamage is capped by what's left).
+        float newBlocked = ev.getBlockedDamage();
+        blocked.set(newBlocked);
+        damageContainer.setBlockedDamage(ev);
+        BlocksAttacksPatch.withFixedDamage(ev.shieldDamage(), () -> original.call(blocksAttacks, level, blockingWith, user, hand, newBlocked));
+    }
+
+    // Neo: ArmorHurtEvent decides each piece's durability damage, and the hook applies it; vanilla's loop doesn't run
+    // (NeoForge's "if (true) return").
+    @Definition(id = "durabilityDamage", local = @Local(type = int.class, name = "durabilityDamage"))
+    @Expression("durabilityDamage = ?")
+    @Inject(method = "doHurtEquipment", at = @At(value = "MIXINEXTRAS:EXPRESSION", shift = At.Shift.AFTER), cancellable = true)
+    private void versionunbound$armorHurt(DamageSource damageSource, float damage, EquipmentSlot[] slots, CallbackInfo ci, @Local(name = "durabilityDamage") int durabilityDamage) {
+        CommonHooks.onArmorHurt(damageSource, slots, durabilityDamage, (LivingEntity) (Object) this);
+        ci.cancel();
     }
 
     // Inside the resistance block, when vanilla counts the resisted damage.

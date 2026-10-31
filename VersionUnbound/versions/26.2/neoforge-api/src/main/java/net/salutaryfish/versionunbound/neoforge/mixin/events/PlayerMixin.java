@@ -1,6 +1,7 @@
 package net.salutaryfish.versionunbound.neoforge.mixin.events;
 
 import com.google.common.base.Preconditions;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -43,7 +44,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * when an entity interaction uses up the held item or an attack breaks the weapon, {@code PlayerWakeUpEvent} when
  * the player leaves a bed (before anything else; {@code ServerPlayer}'s override tells the clients first), and
  * {@code PlayerEvent.BreakSpeed} on the player's destroy speed, with NeoForge's position-sensitive overloads of
- * {@code getDestroySpeed} and {@code hasCorrectToolForDrops} ({@link PlayerExtension}).
+ * {@code getDestroySpeed} and {@code hasCorrectToolForDrops} ({@link PlayerExtension}), and
+ * {@code PlayerFlyableFallEvent} when a player who may fly lands.
  */
 @Mixin(Player.class)
 abstract class PlayerMixin implements PlayerExtension {
@@ -184,6 +186,18 @@ abstract class PlayerMixin implements PlayerExtension {
 
             // Neo: Now we go back to hurtServer, where we'll update various metadata fields, process the side effects of damage (i.e. killing the entity), and firing LivingDamageEvent.Post
         }
+    }
+
+    // Neo: PlayerFlyableFallEvent when a player who may fly lands (and takes no fall damage). NeoForge asks the player
+    // extension's mayFly(), which also counts the creative flight attribute (Phase 2 step 5); vanilla's mayfly until then.
+    // VersionUnbound: NeoForge 26.2 passes damageModifier as both the distance and the multiplier (it adapted 1.21.1's
+    // call, which passed the fall distance as both, when fallDistance became a double); the event's distance is the
+    // fall distance and its multiplier the damage multiplier, so each gets its own (HANDOFF.md §1, the documented
+    // behaviour rule).
+    @ModifyExpressionValue(method = "causeFallDamage", at = @At(value = "FIELD", target = "Lnet/minecraft/world/entity/player/Abilities;mayfly:Z"))
+    private boolean versionunbound$flyableFall(boolean mayfly, @Local(argsOnly = true) double fallDistance, @Local(argsOnly = true) float damageModifier) {
+        if (mayfly) EventHooks.onPlayerFall((Player) (Object) this, (float) fallDistance, damageModifier);
+        return mayfly;
     }
 
     @Inject(method = "stopSleepInBed", at = @At("HEAD"))

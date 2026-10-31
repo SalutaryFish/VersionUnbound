@@ -6,6 +6,7 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import org.jspecify.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,7 +17,8 @@ import org.spongepowered.asm.mixin.gen.Invoker;
  * The death drops ({@code LivingEntity.die} calls this), for the player death drop checks in {@code PlayerScenario}, and
  * the remaining use time, so {@code DestroyItemScenario} can release a bow as if it had been drawn. For
  * {@code EffectScenario}: one tick of the effects, and the synced effect particles. For {@code GriefingScenario}: the
- * wither rose a wither's victim leaves.
+ * wither rose a wither's victim leaves. For {@code EquipmentScenario}: the armor durability damage
+ * ({@code doHurtEquipment}, which vanilla only calls for players, horses and wolves).
  */
 @Mixin(LivingEntity.class)
 public interface LivingEntityInvoker {
@@ -34,6 +36,9 @@ public interface LivingEntityInvoker {
 
     @Invoker("createWitherRose")
     void events$createWitherRose(@Nullable LivingEntity killer);
+
+    @Invoker("doHurtEquipment")
+    void events$doHurtEquipment(DamageSource source, float damage, EquipmentSlot[] slots);
 
     @Accessor("DATA_EFFECT_PARTICLES")
     static EntityDataAccessor<List<ParticleOptions>> events$dataEffectParticles() {

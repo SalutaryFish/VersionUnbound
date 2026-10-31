@@ -50,6 +50,7 @@ import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.item.ItemExpireEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.living.AnimalTameEvent;
+import net.neoforged.neoforge.event.entity.living.ArmorHurtEvent;
 import net.neoforged.neoforge.event.entity.living.BabyEntitySpawnEvent;
 import net.neoforged.neoforge.event.entity.living.EffectParticleModificationEvent;
 import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
@@ -69,6 +70,7 @@ import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
 import net.neoforged.neoforge.event.entity.living.LivingHealEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingKnockBackEvent;
+import net.neoforged.neoforge.event.entity.living.LivingShieldBlockEvent;
 import net.neoforged.neoforge.event.entity.living.MobEffectEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 import net.neoforged.neoforge.event.entity.player.AdvancementEvent;
@@ -78,6 +80,7 @@ import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerDestroyItemEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerFlyableFallEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerRespawnPositionEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerWakeUpEvent;
@@ -182,6 +185,15 @@ final class ServerEvents {
         bus.addListener(EntityInvulnerabilityCheckEvent.class, event -> {
             if (!event.getEntity().level().isClientSide()) session().damage.invulnerability(event);
         });
+        bus.addListener(LivingShieldBlockEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().equipment.shieldBlock(event);
+        });
+        bus.addListener(ArmorHurtEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().equipment.armorHurt(event);
+        });
+        bus.addListener(PlayerFlyableFallEvent.class, event -> {
+            if (!event.getEntity().level().isClientSide()) session().equipment.flyableFall(event);
+        });
         bus.addListener(LivingChangeTargetEvent.class, event -> {
             if (!event.getEntity().level().isClientSide()) session().living.changeTarget(event);
         });
@@ -210,6 +222,7 @@ final class ServerEvents {
         bus.addListener(PlayerDestroyItemEvent.class, event -> {
             if (event.getEntity().level().isClientSide()) return;
             session().destroyedItems.destroyItem(event);
+            session().equipment.destroyItem(event);
             session().placements.destroyItem(event);
         });
         bus.addListener(ProjectileImpactEvent.class, event -> {
@@ -399,6 +412,7 @@ final class ServerEvents {
         private Entity deathCanceled;
         private Entity dropsCanceled;
         private final DamageScenario damage = new DamageScenario(checks);
+        private final EquipmentScenario equipment = new EquipmentScenario(checks, playerChecks);
         private final LivingScenario living = new LivingScenario(checks);
         private final ItemScenario items = new ItemScenario(checks, playerChecks, joins);
         private final ChunkScenario chunks = new ChunkScenario(checks, playerChecks);
@@ -417,7 +431,7 @@ final class ServerEvents {
         private final LevelScenario levelEvents = new LevelScenario(checks, playerChecks);
         private final PlayerEventScenario playerEvents = new PlayerEventScenario(playerChecks);
         private final PlacementScenario placements = new PlacementScenario(checks, playerChecks);
-        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, items, destroyedItems, projectiles, teleports, survival, spawns,
+        private final PlayerScenario players = new PlayerScenario(playerChecks, joins, leaves, damage, equipment, items, destroyedItems, projectiles, teleports, survival, spawns,
                 tames, blocks, levelEvents, playerEvents, placements);
         private final List<String> trace = new CopyOnWriteArrayList<>();
         private MinecraftServer server;
@@ -594,6 +608,7 @@ final class ServerEvents {
             surviving.discard();
 
             damage.run(overworld, 12.5, y, 9.5);
+            equipment.run(overworld, 16.5, y, 9.5);
             living.run(overworld, 6.5, y, 12.5);
             items.run(overworld, 2.5, y, 12.5);
             effects.run(overworld);
