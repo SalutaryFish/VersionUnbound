@@ -352,13 +352,21 @@ final class PlayerEventScenario {
         }
     }
 
-    /** Places stone, has the player break it; returns whether it dropped anything (the drops are discarded). */
+    /**
+     * Places stone, has the player break it; returns whether it dropped stone's drop, cobblestone (the break's drops are
+     * discarded). Only items that weren't near the block before the break count: the dev world is kept between runs, and
+     * items from earlier runs lie around spawn (mobs the server scenarios leave in the air fall and die there), on the
+     * ground or on trees, where the player can stand next to them. And only cobblestone: had the stone replaced a block
+     * something rested on, that would drop when the stone goes.
+     */
     private static boolean breakAndCollect(ServerPlayer player, ServerLevel level, BlockPos pos) {
         level.setBlock(pos, Blocks.STONE.defaultBlockState(), FLAGS);
+        AABB around = new AABB(pos).inflate(1.5);
+        List<ItemEntity> before = level.getEntitiesOfClass(ItemEntity.class, around);
         player.gameMode.destroyBlock(pos);
-        List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, new AABB(pos).inflate(1.5));
+        List<ItemEntity> drops = level.getEntitiesOfClass(ItemEntity.class, around, item -> !before.contains(item));
         drops.forEach(Entity::discard);
-        return !drops.isEmpty();
+        return drops.stream().anyMatch(item -> item.getItem().is(Items.COBBLESTONE));
     }
 
     private void bonemeal(ServerPlayer player, ServerLevel level, BlockPos base) {
