@@ -100,6 +100,7 @@
               packages = [
                 jdk
                 pkgs.git
+                pkgs.curl
                 pkgs.jq
                 pkgs.unzip
                 pkgs.zip

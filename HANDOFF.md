@@ -36,15 +36,16 @@ Phases:
 
 ## 2. Repository map
 
-Repo root: `/home/username/Development/active/minecraft-modding/VersionUnbound` (git repo, branch `main`; each completed step is a commit, see `git log`).
+Repo root: `/home/username/Development/active/minecraft-modding/VersionUnbound` on the user's machine, pushed to `github.com/SalutaryFish/VersionUnbound` (public; git repo, branch `main`; each completed step is a commit, see `git log`).
 
 ```
 flake.nix, flake.lock         dev shells + `mc-src` tool (decompiles vanilla)
 nix/mc-src.sh                 the mc-src script
+scripts/setup-src.sh          rebuilds all of src/ below in a fresh checkout, pinned (§3)
 .gitignore                    ignores src/mc-*/, src/mod_Src/, src/mod_Jars_*/, build/, .gradle/, run/, IDE files
 HANDOFF.md                    this file
 VersionUnbound/versions/26.2/ the Gradle project (Fabric Loom), see §4
-src/                          REFERENCE MATERIAL, all git-ignored
+src/                          REFERENCE MATERIAL, all git-ignored (rebuild: scripts/setup-src.sh)
   mc-1.21.1/  {java,resources,asset-index.json}   decompiled 1.21.1, Mojang names + Parchment params/javadocs
   mc-26.2/    {java,resources,asset-index.json}   decompiled 26.2 (shipped unobfuscated by Mojang)
   mod_Src/main/
@@ -54,7 +55,7 @@ src/                          REFERENCE MATERIAL, all git-ignored
     NeoForge-26.2/       shallow clone, branch 26.2.x  ← main porting source for Layer A
     FML-11.0.16/         FML sources (unpacked loader-11.0.16-sources.jar): net/neoforged/{fml,neoforgespi}
   mod_Src/test/          source repos of the test mods (several are NOT on 1.21.1 branches; use the jars)
-  mod_Jars_1-21-1_Neoforge/   THE TEST JARS (1.3 GB including .git dirs), see §7
+  mod_Jars_1-21-1_Neoforge/   THE TEST JARS (306 MB; the user's copy also holds the mod repos' .git dirs, 1.3 GB), see §7
 ```
 
 Key files inside the NeoForge 26.2 clone:
@@ -68,9 +69,11 @@ Key files inside the NeoForge 26.2 clone:
 
 ## 3. Environment and commands
 
+- **Fresh checkout (e.g. a cloud session): run `scripts/setup-src.sh` first.** It rebuilds the git-ignored `src/` (§2): the clones at their pinned commits (shallow; `FULL_HISTORY=1` for whole branches), the FML sources from NeoForged's Maven, the test jars from Modrinth (sha512-checked), then `mc-src 26.2 1.21.1`. It enters the dev shell itself, keeps whatever is already there, and takes parts as arguments (`clones fml jars mc`). Vineflower runs with `-Xmx6G`.
+- **Network a fresh environment needs.** The dev shell: cache.nixos.org, plus maven.fabricmc.net, maven.neoforged.net and repo1.maven.org (the flake fetches mc-src's tool jars from them; the binary cache doesn't have them). The build: services.gradle.org and downloads.gradle.org (the wrapper), plugins.gradle.org, repo1.maven.org, maven.fabricmc.net (Loom, Fabric), maven.neoforged.net (NeoForge's libraries), and Mojang's piston-meta.mojang.com, piston-data.mojang.com and libraries.minecraft.net (Loom fetches Minecraft); `runClient` also needs resources.download.minecraft.net (assets). `scripts/setup-src.sh` adds github.com, gitlab.com (Cobblemon), maven.parchmentmc.org and cdn.modrinth.com. When a pinned version changes (a new test jar, a clone moved to another commit), update its line in the script.
 - **NixOS.** Use the flake dev shell. Java isn't on PATH outside it, and neither is `zip`.
   - `nix develop` gives JDK 25 (for 26.x). `nix develop .#jdk21` gives JDK 21 (for 1.21.x).
-  - Both shells set `LD_LIBRARY_PATH` for LWJGL and include `mc-src`, `git`, `jq`, `zip`/`unzip`, `xvfb-run`.
+  - Both shells set `LD_LIBRARY_PATH` for LWJGL and include `mc-src`, `git`, `curl`, `jq`, `zip`/`unzip`, `xvfb-run`.
 - **The flake only sees git-tracked files.** If you add a file the flake reads (e.g. under `nix/`), `git add` it first, or Nix won't find it.
 - Build and run, from `VersionUnbound/versions/26.2` (`<repo>` is the repo root). Write logs to the session scratchpad; `*.log` isn't git-ignored.
   ```
@@ -115,7 +118,7 @@ Key files inside the NeoForge 26.2 clone:
   - `~/.cache/mc-src/jars/1.21.1-client-mojmap.jar` (1.21.1 remapped)
   - `~/.cache/mc-src/jars/1.21.1-classpath.txt` (library list)
 - **Scratch files** go in the session scratchpad. Downloaded or extracted third-party content goes in its own directory. Run Python on it with `python3 -I`.
-- **Git identity:** commits use the user's own identity `EroLightz <michelleyevon@protonmail.com>`, set in this repo's local git config (the global config is a placeholder). Never mention Claude in commits: no `Co-Authored-By` trailer. Don't commit unless asked.
+- **Git identity:** commits use the user's own identity `SalutaryFish <michelleyevon@protonmail.com>` (renamed from EroLightz on 2026-10-31, history included), set in this repo's local git config (the global config is a placeholder). Never mention Claude in commits: no `Co-Authored-By` trailer. Don't commit unless asked.
 
 ---
 

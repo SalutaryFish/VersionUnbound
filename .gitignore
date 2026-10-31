@@ -1,4 +1,5 @@
-# Decompiled vanilla sources (regenerate with: mc-src 26.2 1.21.1)
+# Reference material, rebuilt by scripts/setup-src.sh (HANDOFF.md §2)
+# Decompiled vanilla sources (mc-src 26.2 1.21.1)
 /src/mc-*/
 
 # Build output
