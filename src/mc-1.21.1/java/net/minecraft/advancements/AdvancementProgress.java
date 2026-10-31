@@ -1,0 +1,192 @@
+package net.minecraft.advancements;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.Map.Entry;
+import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.ExtraCodecs;
+
+public class AdvancementProgress implements Comparable<AdvancementProgress> {
+    private static final DateTimeFormatter OBTAINED_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z", Locale.ROOT);
+    private static final Codec<Instant> OBTAINED_TIME_CODEC = ExtraCodecs.temporalCodec(OBTAINED_TIME_FORMAT)
+        .xmap(Instant::from, instant -> instant.atZone(ZoneId.systemDefault()));
+    private static final Codec<Map<String, CriterionProgress>> CRITERIA_CODEC = Codec.unboundedMap(Codec.STRING, OBTAINED_TIME_CODEC)
+        .xmap(
+            achievements -> achievements.entrySet().stream().collect(Collectors.toMap(Entry::getKey, entry -> new CriterionProgress(entry.getValue()))),
+            achievements -> achievements.entrySet()
+                .stream()
+                .filter(criteria -> criteria.getValue().isDone())
+                .collect(Collectors.toMap(Entry::getKey, entry -> Objects.requireNonNull(entry.getValue().getObtained())))
+        );
+    public static final Codec<AdvancementProgress> CODEC = RecordCodecBuilder.create(
+        instance -> instance.group(
+                CRITERIA_CODEC.optionalFieldOf("criteria", Map.of()).forGetter(progress -> progress.criteria),
+                Codec.BOOL.fieldOf("done").orElse(true).forGetter(AdvancementProgress::isDone)
+            )
+            .apply(instance, (criteria, done) -> new AdvancementProgress(new HashMap<>(criteria)))
+    );
+    private final Map<String, CriterionProgress> criteria;
+    private AdvancementRequirements requirements = AdvancementRequirements.EMPTY;
+
+    private AdvancementProgress(Map<String, CriterionProgress> criteria) {
+        this.criteria = criteria;
+    }
+
+    public AdvancementProgress() {
+        this.criteria = Maps.newHashMap();
+    }
+
+    public void update(AdvancementRequirements requirements) {
+        Set<String> set = requirements.names();
+        this.criteria.entrySet().removeIf(criteria -> !set.contains(criteria.getKey()));
+
+        for (String string : set) {
+            this.criteria.putIfAbsent(string, new CriterionProgress());
+        }
+
+        this.requirements = requirements;
+    }
+
+    public boolean isDone() {
+        return this.requirements.test(this::isCriterionDone);
+    }
+
+    public boolean hasProgress() {
+        for (CriterionProgress criterionProgress : this.criteria.values()) {
+            if (criterionProgress.isDone()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public boolean grantProgress(String criterionName) {
+        CriterionProgress criterionProgress = this.criteria.get(criterionName);
+        if (criterionProgress != null && !criterionProgress.isDone()) {
+            criterionProgress.grant();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    public boolean revokeProgress(String criterionName) {
+        CriterionProgress criterionProgress = this.criteria.get(criterionName);
+        if (criterionProgress != null && criterionProgress.isDone()) {
+            criterionProgress.revoke();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "AdvancementProgress{criteria=" + this.criteria + ", requirements=" + this.requirements + "}";
+    }
+
+    public void serializeToNetwork(FriendlyByteBuf buffer) {
+        buffer.writeMap(this.criteria, FriendlyByteBuf::writeUtf, (bufferx, criterionProgress) -> criterionProgress.serializeToNetwork(bufferx));
+    }
+
+    public static AdvancementProgress fromNetwork(FriendlyByteBuf buffer) {
+        Map<String, CriterionProgress> map = buffer.readMap(FriendlyByteBuf::readUtf, CriterionProgress::fromNetwork);
+        return new AdvancementProgress(map);
+    }
+
+    @Nullable
+    public CriterionProgress getCriterion(String criterionName) {
+        return this.criteria.get(criterionName);
+    }
+
+    private boolean isCriterionDone(String criterionName) {
+        CriterionProgress criterionProgress = this.getCriterion(criterionName);
+        return criterionProgress != null && criterionProgress.isDone();
+    }
+
+    public float getPercent() {
+        if (this.criteria.isEmpty()) {
+            return 0.0F;
+        }
+
+        float f = this.requirements.size();
+        float g = this.countCompletedRequirements();
+        return g / f;
+    }
+
+    @Nullable
+    public Component getProgressText() {
+        if (this.criteria.isEmpty()) {
+            return null;
+        }
+
+        int i = this.requirements.size();
+        if (i <= 1) {
+            return null;
+        }
+
+        int j = this.countCompletedRequirements();
+        return Component.translatable("advancements.progress", j, i);
+    }
+
+    private int countCompletedRequirements() {
+        return this.requirements.count(this::isCriterionDone);
+    }
+
+    public Iterable<String> getRemainingCriteria() {
+        List<String> list = Lists.newArrayList();
+
+        for (Entry<String, CriterionProgress> entry : this.criteria.entrySet()) {
+            if (!entry.getValue().isDone()) {
+                list.add(entry.getKey());
+            }
+        }
+
+        return list;
+    }
+
+    public Iterable<String> getCompletedCriteria() {
+        List<String> list = Lists.newArrayList();
+
+        for (Entry<String, CriterionProgress> entry : this.criteria.entrySet()) {
+            if (entry.getValue().isDone()) {
+                list.add(entry.getKey());
+            }
+        }
+
+        return list;
+    }
+
+    @Nullable
+    public Instant getFirstProgressDate() {
+        return this.criteria.values().stream().map(CriterionProgress::getObtained).filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(null);
+    }
+
+    public int compareTo(AdvancementProgress other) {
+        Instant instant = this.getFirstProgressDate();
+        Instant instant2 = other.getFirstProgressDate();
+        if (instant == null && instant2 != null) {
+            return 1;
+        } else if (instant != null && instant2 == null) {
+            return -1;
+        } else {
+            return instant == null && instant2 == null ? 0 : instant.compareTo(instant2);
+        }
+    }
+}

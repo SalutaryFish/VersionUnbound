@@ -42,10 +42,10 @@ Repo root: `/home/username/Development/active/minecraft-modding/VersionUnbound` 
 flake.nix, flake.lock         dev shells + `mc-src` tool (decompiles vanilla)
 nix/mc-src.sh                 the mc-src script
 scripts/setup-src.sh          rebuilds all of src/ below in a fresh checkout, pinned (§3)
-.gitignore                    ignores src/mc-*/, src/mod_Src/, src/mod_Jars_*/, build/, .gradle/, run/, IDE files
+.gitignore                    ignores the clones in src/mod_Src/ (not FML-11.0.16), build/, .gradle/, run/, IDE files
 HANDOFF.md                    this file
 VersionUnbound/versions/26.2/ the Gradle project (Fabric Loom), see §4
-src/                          REFERENCE MATERIAL, all git-ignored (rebuild: scripts/setup-src.sh)
+src/                          REFERENCE MATERIAL, committed except the clones (scripts/setup-src.sh clones them)
   mc-1.21.1/  {java,resources,asset-index.json}   decompiled 1.21.1, Mojang names + Parchment params/javadocs
   mc-26.2/    {java,resources,asset-index.json}   decompiled 26.2 (shipped unobfuscated by Mojang)
   mod_Src/main/
@@ -55,7 +55,8 @@ src/                          REFERENCE MATERIAL, all git-ignored (rebuild: scri
     NeoForge-26.2/       shallow clone, branch 26.2.x  ← main porting source for Layer A
     FML-11.0.16/         FML sources (unpacked loader-11.0.16-sources.jar): net/neoforged/{fml,neoforgespi}
   mod_Src/test/          source repos of the test mods (several are NOT on 1.21.1 branches; use the jars)
-  mod_Jars_1-21-1_Neoforge/   THE TEST JARS (306 MB; the user's copy also holds the mod repos' .git dirs, 1.3 GB), see §7
+  mod_Jars_1-21-1_Neoforge/   THE TEST JARS (306 MB; the user's copy also holds the mod repos' .git dirs, 1.3 GB), see §7.
+                              The Cobblemon jar is over GitHub's 100 MB limit: committed as .part-00/01, the jar git-ignored.
 ```
 
 Key files inside the NeoForge 26.2 clone:
@@ -69,7 +70,7 @@ Key files inside the NeoForge 26.2 clone:
 
 ## 3. Environment and commands
 
-- **Fresh checkout (e.g. a cloud session): run `scripts/setup-src.sh` first.** It rebuilds the git-ignored `src/` (§2): the clones at their pinned commits (shallow; `FULL_HISTORY=1` for whole branches), the FML sources from NeoForged's Maven, the test jars from Modrinth (sha512-checked), then `mc-src 26.2 1.21.1`. It enters the dev shell itself, keeps whatever is already there, and takes parts as arguments (`clones fml jars mc`). Vineflower runs with `-Xmx6G`.
+- **Fresh checkout (e.g. a cloud session): run `scripts/setup-src.sh` first.** It clones the reference repos into `src/mod_Src/` at their pinned commits from GitHub and GitLab (shallow; `FULL_HISTORY=1` for whole branches; one that can't be fetched is skipped, and the script exits 1 naming it), and joins the Cobblemon jar from its committed pieces. The rest of `src/` is committed (§2), because a cloud session can't reach Mojang, Modrinth or the Mavens to make it; the script checks the jars' sha512 and would still download the FML sources, the jars (Modrinth) and `mc-src 26.2 1.21.1` where they're missing. **Adding a test jar:** the user's jar folders hold `.git` dirs, so `git add` silently skips files there. Stage with `git update-index --add --cacheinfo 100644,$(git hash-object -w F),F`, split anything over 100 MB with `split -b 95m -d -a 2 F F.part-` (and git-ignore F), and add its line to the script's `JARS`. It enters the dev shell itself, keeps whatever is already there, and takes parts as arguments (`clones fml jars mc`). Vineflower runs with `-Xmx6G`.
 - **Network a fresh environment needs.** The dev shell: cache.nixos.org, plus maven.fabricmc.net, maven.neoforged.net and repo1.maven.org (the flake fetches mc-src's tool jars from them; the binary cache doesn't have them). The build: services.gradle.org and downloads.gradle.org (the wrapper), plugins.gradle.org, repo1.maven.org, maven.fabricmc.net (Loom, Fabric), maven.neoforged.net (NeoForge's libraries), and Mojang's piston-meta.mojang.com, piston-data.mojang.com and libraries.minecraft.net (Loom fetches Minecraft); `runClient` also needs resources.download.minecraft.net (assets). `scripts/setup-src.sh` adds github.com, gitlab.com (Cobblemon), maven.parchmentmc.org and cdn.modrinth.com. When a pinned version changes (a new test jar, a clone moved to another commit), update its line in the script.
 - **NixOS.** Use the flake dev shell. Java isn't on PATH outside it, and neither is `zip`.
   - `nix develop` gives JDK 25 (for 26.x). `nix develop .#jdk21` gives JDK 21 (for 1.21.x).

@@ -1,0 +1,65 @@
+package net.minecraft.client.renderer;
+
+import com.google.common.collect.Queues;
+import com.mojang.logging.LogUtils;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Queue;
+import javax.annotation.Nullable;
+import org.slf4j.Logger;
+
+public class SectionBufferBuilderPool {
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private final Queue<SectionBufferBuilderPack> freeBuffers;
+    private volatile int freeBufferCount;
+
+    private SectionBufferBuilderPool(List<SectionBufferBuilderPack> freeBuffers) {
+        this.freeBuffers = Queues.newArrayDeque(freeBuffers);
+        this.freeBufferCount = this.freeBuffers.size();
+    }
+
+    public static SectionBufferBuilderPool allocate(int bufferCount) {
+        int i = Math.max(1, (int)(Runtime.getRuntime().maxMemory() * 0.3) / SectionBufferBuilderPack.TOTAL_BUFFERS_SIZE);
+        int j = Math.max(1, Math.min(bufferCount, i));
+        List<SectionBufferBuilderPack> list = new ArrayList<>(j);
+
+        try {
+            for (int k = 0; k < j; k++) {
+                list.add(new SectionBufferBuilderPack());
+            }
+        } catch (OutOfMemoryError outOfMemoryError) {
+            LOGGER.warn("Allocated only {}/{} buffers", list.size(), j);
+            int l = Math.min(list.size() * 2 / 3, list.size() - 1);
+
+            for (int m = 0; m < l; m++) {
+                list.remove(list.size() - 1).close();
+            }
+        }
+
+        return new SectionBufferBuilderPool(list);
+    }
+
+    @Nullable
+    public SectionBufferBuilderPack acquire() {
+        SectionBufferBuilderPack sectionBufferBuilderPack = this.freeBuffers.poll();
+        if (sectionBufferBuilderPack != null) {
+            this.freeBufferCount = this.freeBuffers.size();
+            return sectionBufferBuilderPack;
+        } else {
+            return null;
+        }
+    }
+
+    public void release(SectionBufferBuilderPack buffer) {
+        this.freeBuffers.add(buffer);
+        this.freeBufferCount = this.freeBuffers.size();
+    }
+
+    public boolean isEmpty() {
+        return this.freeBuffers.isEmpty();
+    }
+
+    public int getFreeBufferCount() {
+        return this.freeBufferCount;
+    }
+}

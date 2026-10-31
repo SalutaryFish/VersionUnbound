@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# setup-src: rebuild the git-ignored reference material under src/ (HANDOFF.md §2) from
-# where it came from, pinned to the exact commits, files and hashes the project was built with.
+# setup-src: rebuild the reference material under src/ (HANDOFF.md §2) from where it came
+# from, pinned to the exact commits, files and hashes the project was built with.
+#
+# The repo commits everything but the clones (src/mc-*, the FML sources, the test jars, with
+# jars over GitHub's 100 MB limit as <jar>.part-NN pieces), so in a checkout the other parts
+# only check hashes and join pieces; they still download whatever is missing.
 #
 #   scripts/setup-src.sh [part...]    parts: clones fml jars mc (default: all of them)
 #
@@ -89,7 +93,11 @@ fetch() {
     return 0
   fi
   mkdir -p "$(dirname "$dest")"
-  curl -fsSL --retry 3 -o "$dest.part" "$url"
+  if [[ -f "$dest.part-00" ]]; then
+    cat "$dest".part-[0-9][0-9] >"$dest.part"
+  else
+    curl -fsSL --retry 3 -o "$dest.part" "$url"
+  fi
   if ! echo "$hash  $dest.part" | "${algo}sum" -c --status; then
     rm -f "$dest.part"
     log "$algo mismatch for $url"
@@ -99,7 +107,7 @@ fetch() {
 }
 
 clones() {
-  local dir url branch commit dest have
+  local dir url branch commit dest have refspec
   while read -r dir url branch commit; do
     [[ -n "$dir" ]] || continue
     dest=$SRC/$dir
@@ -113,9 +121,15 @@ clones() {
     git init -q "$dest.part"
     git -C "$dest.part" remote add origin "$url"
     if [[ "${FULL_HISTORY:-}" == 1 ]]; then
-      git -C "$dest.part" fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+      refspec=("+refs/heads/$branch:refs/remotes/origin/$branch")
     else
-      git -C "$dest.part" fetch -q --depth 1 origin "$commit"
+      refspec=(--depth 1 "$commit")
+    fi
+    if ! git -C "$dest.part" fetch -q origin "${refspec[@]}"; then
+      log "$dir: couldn't fetch from $url; skipped"
+      rm -rf "$dest.part"
+      failed+=("$dir")
+      continue
     fi
     git -C "$dest.part" checkout -q -B "$branch" "$commit"
     git -C "$dest.part" config "branch.$branch.remote" origin
@@ -152,6 +166,7 @@ mc() {
   done
 }
 
+failed=()
 parts=("$@")
 [[ ${#parts[@]} -gt 0 ]] || parts=(clones fml jars mc)
 for part in "${parts[@]}"; do
@@ -163,4 +178,8 @@ for part in "${parts[@]}"; do
       ;;
   esac
 done
+if [[ ${#failed[@]} -gt 0 ]]; then
+  log "done -> $SRC, except: ${failed[*]}"
+  exit 1
+fi
 log "done -> $SRC"

@@ -1,7 +1,3 @@
-# Reference material, rebuilt by scripts/setup-src.sh (HANDOFF.md §2)
-# Decompiled vanilla sources (mc-src 26.2 1.21.1)
-/src/mc-*/
-
 # Build output
 /dist/
 build/
@@ -20,6 +16,14 @@ result-*
 .settings/
 bin/
 
-# Upstream reference clones (separate git repos) and test mod jars
-/src/mod_Src/
-/src/mod_Jars_*/
+# Reference material (HANDOFF.md §2). Committed: src/mc-*/, the FML sources and the test jars.
+# The upstream clones are separate git repos; scripts/setup-src.sh clones them.
+/src/mod_Src/test/
+/src/mod_Src/main/*
+!/src/mod_Src/main/FML-11.0.16/
+# The user's jar folders also hold the mod repos' .git dirs and dotfiles; only the jars are committed.
+/src/mod_Jars_*/*/*
+!/src/mod_Jars_*/*/*.jar
+!/src/mod_Jars_*/*/*.jar.part-[0-9][0-9]
+# Over GitHub's 100 MB limit: committed as .part-NN pieces, joined by scripts/setup-src.sh.
+/src/mod_Jars_1-21-1_Neoforge/cobblemon/Cobblemon-neoforge-1.8.4+1.21.1.jar

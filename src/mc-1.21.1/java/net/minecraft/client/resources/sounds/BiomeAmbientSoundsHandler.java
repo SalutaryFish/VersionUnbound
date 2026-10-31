@@ -1,0 +1,144 @@
+package net.minecraft.client.resources.sounds;
+
+import it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap;
+import java.util.Optional;
+import javax.annotation.Nullable;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.core.BlockPos;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.biome.AmbientAdditionsSettings;
+import net.minecraft.world.level.biome.AmbientMoodSettings;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeManager;
+
+public class BiomeAmbientSoundsHandler implements AmbientSoundHandler {
+    private static final int LOOP_SOUND_CROSS_FADE_TIME = 40;
+    private static final float SKY_MOOD_RECOVERY_RATE = 0.001F;
+    private final LocalPlayer player;
+    private final SoundManager soundManager;
+    private final BiomeManager biomeManager;
+    private final RandomSource random;
+    private final Object2ObjectArrayMap<Biome, BiomeAmbientSoundsHandler.LoopSoundInstance> loopSounds = new Object2ObjectArrayMap<>();
+    private Optional<AmbientMoodSettings> moodSettings = Optional.empty();
+    private Optional<AmbientAdditionsSettings> additionsSettings = Optional.empty();
+    private float moodiness;
+    @Nullable
+    private Biome previousBiome;
+
+    public BiomeAmbientSoundsHandler(LocalPlayer player, SoundManager soundManager, BiomeManager biomeManager) {
+        this.random = player.level().getRandom();
+        this.player = player;
+        this.soundManager = soundManager;
+        this.biomeManager = biomeManager;
+    }
+
+    public float getMoodiness() {
+        return this.moodiness;
+    }
+
+    @Override
+    public void tick() {
+        this.loopSounds.values().removeIf(AbstractTickableSoundInstance::isStopped);
+        Biome biome = this.biomeManager.getNoiseBiomeAtPosition(this.player.getX(), this.player.getY(), this.player.getZ()).value();
+        if (biome != this.previousBiome) {
+            this.previousBiome = biome;
+            this.moodSettings = biome.getAmbientMood();
+            this.additionsSettings = biome.getAmbientAdditions();
+            this.loopSounds.values().forEach(BiomeAmbientSoundsHandler.LoopSoundInstance::fadeOut);
+            biome.getAmbientLoop().ifPresent(holder -> this.loopSounds.compute(biome, (biomexx, loopSoundInstance) -> {
+                if (loopSoundInstance == null) {
+                    loopSoundInstance = new BiomeAmbientSoundsHandler.LoopSoundInstance((SoundEvent)holder.value());
+                    this.soundManager.play(loopSoundInstance);
+                }
+
+                loopSoundInstance.fadeIn();
+                return (BiomeAmbientSoundsHandler.LoopSoundInstance)loopSoundInstance;
+            }));
+        }
+
+        this.additionsSettings.ifPresent(settings -> {
+            if (this.random.nextDouble() < settings.getTickChance()) {
+                this.soundManager.play(SimpleSoundInstance.forAmbientAddition(settings.getSoundEvent().value()));
+            }
+        });
+        this.moodSettings
+            .ifPresent(
+                settings -> {
+                    Level level = this.player.level();
+                    int i = settings.getBlockSearchExtent() * 2 + 1;
+                    BlockPos blockPos = BlockPos.containing(
+                        this.player.getX() + this.random.nextInt(i) - settings.getBlockSearchExtent(),
+                        this.player.getEyeY() + this.random.nextInt(i) - settings.getBlockSearchExtent(),
+                        this.player.getZ() + this.random.nextInt(i) - settings.getBlockSearchExtent()
+                    );
+                    int j = level.getBrightness(LightLayer.SKY, blockPos);
+                    if (j > 0) {
+                        this.moodiness = this.moodiness - (float)j / level.getMaxLightLevel() * 0.001F;
+                    } else {
+                        this.moodiness = this.moodiness - (float)(level.getBrightness(LightLayer.BLOCK, blockPos) - 1) / settings.getTickDelay();
+                    }
+
+                    if (this.moodiness >= 1.0F) {
+                        double d = blockPos.getX() + 0.5;
+                        double e = blockPos.getY() + 0.5;
+                        double f = blockPos.getZ() + 0.5;
+                        double g = d - this.player.getX();
+                        double h = e - this.player.getEyeY();
+                        double k = f - this.player.getZ();
+                        double l = Math.sqrt(g * g + h * h + k * k);
+                        double m = l + settings.getSoundPositionOffset();
+                        SimpleSoundInstance simpleSoundInstance = SimpleSoundInstance.forAmbientMood(
+                            settings.getSoundEvent().value(),
+                            this.random,
+                            this.player.getX() + g / l * m,
+                            this.player.getEyeY() + h / l * m,
+                            this.player.getZ() + k / l * m
+                        );
+                        this.soundManager.play(simpleSoundInstance);
+                        this.moodiness = 0.0F;
+                    } else {
+                        this.moodiness = Math.max(this.moodiness, 0.0F);
+                    }
+                }
+            );
+    }
+
+    public static class LoopSoundInstance extends AbstractTickableSoundInstance {
+        private int fadeDirection;
+        private int fade;
+
+        public LoopSoundInstance(SoundEvent soundEvent) {
+            super(soundEvent, SoundSource.AMBIENT, SoundInstance.createUnseededRandom());
+            this.looping = true;
+            this.delay = 0;
+            this.volume = 1.0F;
+            this.relative = true;
+        }
+
+        @Override
+        public void tick() {
+            if (this.fade < 0) {
+                this.stop();
+            }
+
+            this.fade = this.fade + this.fadeDirection;
+            this.volume = Mth.clamp(this.fade / 40.0F, 0.0F, 1.0F);
+        }
+
+        public void fadeOut() {
+            this.fade = Math.min(this.fade, 40);
+            this.fadeDirection = -1;
+        }
+
+        public void fadeIn() {
+            this.fade = Math.max(0, this.fade);
+            this.fadeDirection = 1;
+        }
+    }
+}

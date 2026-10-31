@@ -1,0 +1,100 @@
+package net.minecraft.util.profiling.jfr;
+
+import com.mojang.logging.LogUtils;
+import java.net.SocketAddress;
+import java.nio.file.Path;
+import javax.annotation.Nullable;
+import net.minecraft.network.ConnectionProtocol;
+import net.minecraft.network.protocol.PacketType;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.profiling.jfr.callback.ProfiledDuration;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+import org.slf4j.Logger;
+
+public interface JvmProfiler {
+    JvmProfiler INSTANCE = Runtime.class.getModule().getLayer().findModule("jdk.jfr").isPresent() ? JfrProfiler.getInstance() : new JvmProfiler.NoOpProfiler();
+
+    boolean start(Environment var1);
+
+    Path stop();
+
+    boolean isRunning();
+
+    boolean isAvailable();
+
+    void onServerTick(float var1);
+
+    void onPacketReceived(ConnectionProtocol var1, PacketType<?> var2, SocketAddress var3, int var4);
+
+    void onPacketSent(ConnectionProtocol var1, PacketType<?> var2, SocketAddress var3, int var4);
+
+    void onRegionFileRead(RegionStorageInfo var1, ChunkPos var2, RegionFileVersion var3, int var4);
+
+    void onRegionFileWrite(RegionStorageInfo var1, ChunkPos var2, RegionFileVersion var3, int var4);
+
+    @Nullable
+    ProfiledDuration onWorldLoadedStarted();
+
+    @Nullable
+    ProfiledDuration onChunkGenerate(ChunkPos var1, ResourceKey<Level> var2, String var3);
+
+    class NoOpProfiler implements JvmProfiler {
+        private static final Logger LOGGER = LogUtils.getLogger();
+        static final ProfiledDuration noOpCommit = () -> {};
+
+        @Override
+        public boolean start(Environment environment) {
+            LOGGER.warn("Attempted to start Flight Recorder, but it's not supported on this JVM");
+            return false;
+        }
+
+        @Override
+        public Path stop() {
+            throw new IllegalStateException("Attempted to stop Flight Recorder, but it's not supported on this JVM");
+        }
+
+        @Override
+        public boolean isRunning() {
+            return false;
+        }
+
+        @Override
+        public boolean isAvailable() {
+            return false;
+        }
+
+        @Override
+        public void onPacketReceived(ConnectionProtocol connectionProtocol, PacketType<?> packetType, SocketAddress socketAddress, int i) {
+        }
+
+        @Override
+        public void onPacketSent(ConnectionProtocol connectionProtocol, PacketType<?> packetType, SocketAddress socketAddress, int i) {
+        }
+
+        @Override
+        public void onRegionFileRead(RegionStorageInfo regionStorageInfo, ChunkPos chunkPos, RegionFileVersion regionFileVersion, int i) {
+        }
+
+        @Override
+        public void onRegionFileWrite(RegionStorageInfo regionStorageInfo, ChunkPos chunkPos, RegionFileVersion regionFileVersion, int i) {
+        }
+
+        @Override
+        public void onServerTick(float f) {
+        }
+
+        @Override
+        public ProfiledDuration onWorldLoadedStarted() {
+            return noOpCommit;
+        }
+
+        @Nullable
+        @Override
+        public ProfiledDuration onChunkGenerate(ChunkPos chunkPos, ResourceKey<Level> resourceKey, String string) {
+            return null;
+        }
+    }
+}
